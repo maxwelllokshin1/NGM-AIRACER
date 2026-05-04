@@ -1,0 +1,12 @@
+# Safety Node Parameters
+
+safety_node:
+  ros__parameters:
+    # Time to Collision threshold (seconds)
+    # Lower values = more aggressive braking
+    # Higher values = more conservative, may brake unnecessarily
+    ttc_threshold: 0.40
+
+    # Minimum speed to activate safety checks (m/s)
+    # Below this speed, AEB is disabled to avoid false positives when stationary
+    speed_threshold: 0.5

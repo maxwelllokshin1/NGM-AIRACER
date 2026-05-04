@@ -1,0 +1,13 @@
+
+Now the purpose of the launch files most especially for the ros architecture
+is so that you can start multiple nodes SIMULTANEOUSLY with a single command..
+SO, need to always open multiple terminals to run the executables(which I am 
+pretty sure we used this same concept...but with cpp files and python launch files!
+so the process should be relatively the same...)!
+
+so make a directory in the my_python_pkg folder
+mkdir launch
+
+check out the launch directory for the my_python_pkg folder
+there is the simple launch with the simple_publisher/subscriber nodes being
+implemented

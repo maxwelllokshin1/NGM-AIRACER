@@ -1,0 +1,21 @@
+okay so one cool thing i learned was that when making packages you do not
+have to manually make folders and what not and place them into the designated
+package....instead it appears ros2 has its own mannerism of making packages!
+ex)ros2 pkg create my_python_pkg --build-type ament_python --dependencies rclpy std_msgs
+where...
+	--build-type ament_python specifies the build system of the package and that it will be a 
+Python-based ROS2 package
+	--dependencies rclpy std_msgs specifies the dependencies the package requires
+likely placed since this specific package might this.. 
+	--rclpy: python client library for ROS2, needed to write ROS2 nodes in Python
+	--std_msgs: a package that provides standard message type, such as string, int32, and float64
+and ideally once placed the package the emerges should look something like this....
+my_python_pkg/
+   |---package.xml # file containing metadata information about the package
+   |---setup.py # containing instructions for how to install the package
+   |---setup.cfg #optional; CAN define entry_points and metadata instead of setup.py
+   |---resource/
+	|---my_python_pkg #marker file for the package
+   |---my_python_pkg/
+	|---__init__.py #used to mark directories in disk as Python package directories
+ 

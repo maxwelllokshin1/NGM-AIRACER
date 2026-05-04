@@ -1,0 +1,82 @@
+services:
+  devcontainer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET} 
+    image: airacer:${BUILD_TARGET}
+    ports:
+      - "5900:5900"
+    network_mode: "host"
+    dns:
+      - 8.8.8.8
+    environment:
+      #look inside of the .env file and you will see a varibale for BUILD_TARGET!
+      # Pass the DISPLAY variable from the .env file into the container
+      - DISPLAY=${DISPLAY_CONFIG}
+      - QT_X11_NO_MITSHM=1
+      - ARDUINO_DIRECTORIES_USER=/home/ubuntu/.arduino15
+      - PLATFORMIO_CORE_DIR=/home/ubuntu/.platformio
+    volumes:
+      # --- Source Code (Synced with Host) ---
+      # - ./ros2_ws/src:/home/ubuntu/ros2_workspaces/src/racer_ros:delegated
+      - ./ros2_ws/src/racer_ros:/home/ubuntu/ros2_workspaces/src/racer_ros:delegated
+      # - ./ros2_ws/src/f1tenth_gym_ross:/home/ubuntu/ros2_workspaces/src/f1tenth_gym_ros:delegated
+      # - ./ros2_ws/src/ackermann_msgss:/home/ubuntu/ros2_workspaces/src/ackermann_msgs:delegated
+      # Ensure ROS2 workspace-level VS Code settings land at /home/ubuntu/ros2_workspaces/.vscode
+      - ./ros2_ws/.vscode:/home/ubuntu/ros2_workspaces/.vscode:delegated
+      
+      
+      - ./mcu_ws:/home/ubuntu/mcu_workspaces/racer_mcu:delegated
+      # - ./ros2_ws/src/mcu_msgs:/home/ubuntu/mcu_workspaces/racer_mcu/extra_packages/mcu_msgs:delegated
+      - ./scripts:/home/ubuntu/scripts    
+
+      # --- Build Artifacts (Persisted in Docker, kept off Host) ---
+      # This prevents "root" owned files appearing on your laptop 
+      # and speeds up IO on Windows/Mac
+      - ros2_build:/home/ubuntu/ros2_workspaces/build
+      - ros2_install:/home/ubuntu/ros2_workspaces/install
+      - ros2_log:/home/ubuntu/ros2_workspaces/log
+      - platformio_cache:/home/ubuntu/.platformio
+      - mcu_build_artifacts:/home/ubuntu/mcu_workspaces/racer_mcu/.pio
+      - mcu_lib_external:/home/ubuntu/mcu_workspaces/racer_mcu/libs_external
+
+      # --- System / Hardware ---
+      - /dev:/dev
+      - /sys:/sys
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    # This uses the network mode from the .env file (either 'host' for Linux or 'bridge' for Win/Mac)
+    # network_mode: ${NETWORK_MODE_CONFIG}
+    privileged: true
+    # Keep the container running
+    command: sleep infinity
+    depends_on:
+      init-bootstrap:
+        condition: service_completed_successfully
+
+  # One-shot init to chown all volumes and seed libs_external once
+  init-bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile.init-bootstrap
+    user: root
+    volumes:
+      - ros2_build:/ros2_build
+      - ros2_install:/ros2_install
+      - ros2_log:/ros2_log
+      - platformio_cache:/platformio_cache
+      - mcu_build_artifacts:/mcu_build_artifacts
+      - mcu_lib_external:/mcu_lib_external
+      - ./mcu_ws/libs_external:/seed:ro
+    # Entry point is defined in Dockerfile.init-bootstrap
+    restart: "no"
+
+
+# Create biuld artifact volumes
+volumes:
+  ros2_build:
+  ros2_install:
+  ros2_log:
+  platformio_cache:
+  mcu_build_artifacts:
+  mcu_lib_external:

@@ -1,0 +1,49 @@
+# Wall Follow + Reactive Gap Combined Parameters
+
+trajectory:
+  ros__parameters:
+    # Wall Follow PID Controller ------------
+    # Ziegler-Nichols tuning — STEER_MAX=5deg (0.087 rad), STEER_MIN=-9deg (-0.157 rad)
+    # Saturation point: error = STEER_MAX / Kp = 0.087 / Kp
+    #   Kp=0.06 → saturates at 1.45m error (safe, won't saturate in normal driving)
+    #   Kp=0.15 → saturates at 0.58m error (too aggressive for 14deg range)
+    #
+    # Z-N process:
+    #   1. Run with these values. Car should track wall with gentle corrections.
+    #   2. Increase kp by 0.01 each run until car oscillates at constant amplitude → that is Ku
+    #   3. Time one full oscillation (left→right→left) in seconds → that is Tu
+    #   4. Apply: kp = 0.6*Ku, ki = 1.2*Ku/Tu, kd = 0.075*Ku*Tu
+    #   5. Also reduce max_speed to 1.0 during tuning runs for safety
+    kp: 0.06
+    ki: 0.0
+    kd: 0.0
+
+    desired_distance: 0.9        # (meters)   from the right wall
+    lookahead_distance: 2.0      # (meters)   lookahead
+    theta_deg: 35.0              # (degrees)  angle between two LiDAR beams
+    max_speed: 1.0               # (m/s)      TUNING: lower for safety, raise after PID is stable
+
+    # Follow the Gap configs --------------------
+    bubble_radius: 0.6           # (meters)   safety bubble
+    preprocess_conv_size: 3      #            window for lidar
+    max_lidar_range: 5.5         # (meters)   cliped lidar
+    speed_min: 0.5               # (m/s)      min speed
+    speed_max: 2.5               # (m/s)      max speed
+
+
+    steering_gain: 1.0           #            reactive steering gain
+    disparity_threshold: 0.5     # (meters)   disparity extender and how far to jump
+
+    # blending node ------------
+    # danger_threshold: closest obstacle distance that starts activating reactive mode
+    # blend_range: width of the smooth transition zone — MUST be < danger_threshold
+    #   - > danger_threshold                  ->  wall_follow
+    #   - < (danger_threshold - blend_range)  ->  follow the gap  (full reactive)
+    #   - between                             ->  blend of both
+    # BUG FIX: old blend_range=1.25 > danger_threshold=0.6 so reactive never hit 100%
+    danger_threshold: 1.25        # (meters)
+    blend_range: 0.6             # (meters)  — lower = 1.0-0.4 = 0.6m triggers full reactive
+
+    min_wall_range: 0.15
+    max_wall_range: 4.75
+    wall_blend_alpha: 0.25

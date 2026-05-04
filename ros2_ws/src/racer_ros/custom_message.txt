@@ -1,0 +1,51 @@
+Okay cool now we can get into the custom messages that you can create here
+in the ROS2 environment. You might eventually want to devitate from std_msgs
+given to you using ros to make your message more meaningful!
+ex)
+==Standard Message==
+#Publishing speed as a Float32
+speed_msg = Float32()
+speed_msg.data = 25.5
+==Custom Message==
+#Publishing complete Vehicle state
+vehicle_msg = VehicleState()
+vehicle_msg.speed = 25.5
+vehicle_msg.steering_angle = 15.0
+vehicle_msg.throttle = 0.8
+vehicle_msg.timestamp = self.get_clock().now().to_msg()
+
+In short custom messages are mroe descriptive, organized, and maintainable for 
+complex robotic applications!
+
+Now to make your custom msgs it is best practice to create them as a its own custom package
+so that other nodes are allowed to access and use the custom message itself!
+ros2 pkg create my_custom_msgs --build-type ament_cmake <---has to be cmake because message generation
+requires CMake build system
+
+go into your package and..mkdir msg
+then go into msg and make a custom message....VehicleState.msg
+#VehicleState.msg
+#Custom message for vehicle state information
+float32 speed				#Vehicle speed in m/s
+float32 steering_angle			#Steering angle in degrees
+float32 throttle			#Throttle position(0.0 to 1.0)
+builtin_interfaces/Time timestamp	#Timestamp of the measurement
+
+there are bunch of field types to place within your message structs!
+Basic Types: bool,int8,int16,int32,int64,float32,float64,string,
+Arrays: float32[], float32[5]
+Other Messages: builtin_interfaces/Time, std_msgs/Header
+
+then check out package.xml and the CMakeLists.txt changes placed on there
+the comments help you in out determing what to add or place for 
+your custom msgs
+then go to your root workspace...
+colcon build --packages-select my_custom_msgs
+source install/setup.bash <---cd into install to see which script is most applicable to you in my case its the bash
+then you can do....
+ros2 interface show my_custom_msgs/msg/VehicleState
+P.S you can view other msgs present in your ros2 environment just do....
+ros2 interface list
+
+cool now check out the my_python_pkg folder to see the implementation of using custom messagess.....not that difficult!
+

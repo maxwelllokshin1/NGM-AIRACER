@@ -1,0 +1,1723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F1Tenth Full Debug Dashboard</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg: #060a0f;
+  --surface: #0d1520;
+  --surface-2: #131e2e;
+  --surface-3: #1a2840;
+  --border: #1e3050;
+  --border-bright: #2a4060;
+  --text: #c8daf0;
+  --text-dim: #4a6080;
+  --text-bright: #e8f4ff;
+  --accent: #00e5ff;
+  --accent-dim: rgba(0,229,255,0.1);
+  --accent-glow: rgba(0,229,255,0.25);
+  --warn: #ff6b35;
+  --danger: #ff2d55;
+  --success: #00e676;
+  --left-wall: #a78bfa;
+  --right-wall: #00e5ff;
+  --grid: rgba(30,60,100,0.3);
+
+  --c-setpoint: #a78bfa;
+  --c-actual: #00e5ff;
+  --c-error: #ff2d55;
+  --c-P: #ff9f43;
+  --c-I: #a78bfa;
+  --c-D: #00e676;
+  --c-steering: #ff6b9d;
+  --c-speed: #ffd32a;
+  --c-closest: #ff6b35;
+  --c-reactive: #00e5ff;
+  --c-left: #a78bfa;
+  --c-right: #00e5ff;
+
+  --band-straight: rgba(0,230,118,0.06);
+  --band-turn: rgba(255,107,53,0.06);
+  --band-hairpin: rgba(255,45,85,0.08);
+  --band-dhairpin: rgba(167,139,250,0.08);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(0,100,200,0.08) 0%, transparent 70%);
+}
+
+.mono { font-family: 'Space Mono', monospace; }
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(6,10,15,0.9);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  backdrop-filter: blur(12px);
+}
+
+.header-left { display: flex; align-items: center; gap: 12px; }
+
+.logo-mark {
+  width: 32px; height: 32px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+h1 { font-size: 15px; font-weight: 600; color: var(--text-bright); letter-spacing: -0.01em; }
+
+.tag {
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--accent-dim);
+  color: var(--accent);
+  padding: 3px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid rgba(0,229,255,0.2);
+}
+
+.header-right { display: flex; gap: 8px; align-items: center; }
+
+.status-pill {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); box-shadow: 0 0 6px var(--success); animation: pulse 1.8s infinite; }
+.status-dot.paused { background: var(--text-dim); box-shadow: none; animation: none; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.btn {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--surface-3); border-color: var(--border-bright); color: var(--text-bright); }
+.btn.primary { background: rgba(0,229,255,0.15); border-color: var(--accent); color: var(--accent); }
+.btn.primary:hover { background: rgba(0,229,255,0.25); box-shadow: 0 0 12px var(--accent-glow); }
+.btn.danger { border-color: var(--danger); color: var(--danger); }
+.btn.danger:hover { background: rgba(255,45,85,0.1); }
+
+.dashboard { padding: 20px 24px; }
+
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.stat-card::before { content:''; position:absolute; top:0; left:0; width:3px; height:100%; background:var(--accent); opacity:0.6; }
+.stat-card.warn::before { background: var(--warn); }
+.stat-card.danger-card::before { background: var(--danger); }
+.stat-card.success::before { background: var(--success); }
+.stat-card.left-wall::before { background: var(--left-wall); }
+.stat-card.right-wall::before { background: var(--right-wall); }
+
+.stat-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin-bottom: 5px; }
+.stat-value { font-family: 'Space Mono', monospace; font-size: 18px; font-weight: 700; color: var(--text-bright); line-height: 1; }
+.stat-unit { font-size: 10px; color: var(--text-dim); font-weight: 400; margin-left: 2px; }
+.stat-sub { font-size: 9px; color: var(--text-dim); margin-top: 4px; font-family: 'Space Mono', monospace; }
+
+.main-grid {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+.panel-header {
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-header-left { display: flex; align-items: center; gap: 8px; }
+.panel-body { padding: 16px; }
+
+.section-divider {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 0 10px;
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.section-divider::after { content:''; flex:1; height:1px; background:var(--border); }
+
+.param-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.param-row:last-child { margin-bottom: 0; }
+
+.param-header { display: flex; justify-content: space-between; align-items: center; }
+
+.param-name { font-family: 'Space Mono', monospace; font-size: 11px; display: flex; align-items: center; gap: 6px; }
+.param-hint { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+
+.param-input {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: var(--accent);
+  width: 72px;
+  text-align: right;
+  outline: none;
+}
+.param-input:focus { border-color: var(--accent); }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+.mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.mini-field label { display: block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin-bottom: 4px; }
+
+.mini-field input, .mini-field select {
+  font-family: 'Space Mono', monospace;
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  color: var(--text);
+  width: 100%;
+  outline: none;
+}
+.mini-field input:focus, .mini-field select:focus { border-color: var(--accent); }
+.mini-field select { cursor: pointer; }
+
+.zn-box { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+.zn-box h4 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 8px; }
+.zn-method { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+.zn-method:last-child { border-bottom: none; }
+.zn-method-name { color: var(--text-dim); }
+.zn-vals { font-family: 'Space Mono', monospace; font-size: 10px; color: var(--text); }
+.zn-apply-btn { font-size: 9px; padding: 2px 7px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 3px; color: var(--text-dim); cursor: pointer; transition: all 0.15s; }
+.zn-apply-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.yaml-block { font-family: 'Space Mono', monospace; font-size: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; white-space: pre; overflow-x: auto; line-height: 1.7; color: var(--text-dim); }
+.yaml-block .yk { color: var(--accent); }
+.yaml-block .yv { color: var(--warn); }
+.yaml-block .yc { color: var(--text-dim); opacity: 0.5; }
+
+.charts-area { display: flex; flex-direction: column; gap: 14px; }
+.chart-panel { overflow: visible; }
+
+.chart-header { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.chart-title { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); }
+.chart-wrap { position: relative; height: 200px; padding: 0; }
+.chart-wrap canvas { width: 100% !important; height: 100% !important; display: block; }
+
+.legend-bar { display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 16px; border-top: 1px solid var(--border); background: rgba(0,0,0,0.2); }
+.leg-item { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-dim); cursor: pointer; user-select: none; transition: color 0.15s; }
+.leg-item:hover { color: var(--text); }
+.leg-item.off { opacity: 0.25; }
+.leg-swatch { width: 16px; height: 2px; border-radius: 1px; flex-shrink: 0; }
+
+.seg-legend { display: flex; gap: 12px; padding: 6px 16px; font-size: 9px; color: var(--text-dim); border-top: 1px solid var(--border); }
+.seg-badge { display: flex; align-items: center; gap: 4px; }
+.seg-badge-swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+.osc-info { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font-size: 11px; margin-bottom: 8px; }
+.osc-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; border-bottom: 1px solid var(--border); }
+.osc-row:last-child { border-bottom: none; }
+.osc-key { color: var(--text-dim); }
+.osc-val { font-family: 'Space Mono', monospace; color: var(--text-bright); }
+
+.event-log { max-height: 120px; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.event-entry { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; border-bottom: 1px solid rgba(30,60,100,0.3); font-size: 10px; }
+.event-entry:last-child { border-bottom: none; }
+.event-time { color: var(--text-dim); font-family: 'Space Mono', monospace; min-width: 40px; }
+.event-type { font-weight: 600; }
+.event-type.crash { color: var(--danger); }
+.event-type.warn { color: var(--warn); }
+.event-type.ok { color: var(--success); }
+.event-msg { color: var(--text-dim); font-size: 9px; }
+
+/* ── TRACK VISUALIZER ── */
+.track-panel { overflow: hidden; }
+.track-wrap { position: relative; height: 320px; background: var(--bg); }
+.track-wrap canvas { width: 100% !important; height: 100% !important; display: block; }
+.track-legend {
+  display: flex; gap: 16px; flex-wrap: wrap;
+  padding: 8px 16px; border-top: 1px solid var(--border);
+  background: rgba(0,0,0,0.2);
+  font-size: 10px; color: var(--text-dim);
+}
+.track-legend-item { display: flex; align-items: center; gap: 5px; }
+.track-legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
+
+/* ── GOAL STATUS ── */
+.goal-status {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  margin-top: 8px;
+}
+.goal-progress-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.goal-progress-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 2px;
+  transition: width 0.1s;
+  box-shadow: 0 0 6px var(--success);
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="logo-mark">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00e5ff" stroke-width="2.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+    </div>
+    <h1>F1Tenth Debug Lab</h1>
+    <span class="tag">Dual Wall + Reactive + AEB</span>
+  </div>
+  <div class="header-right">
+    <div class="status-pill">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText" style="font-family:'Space Mono',monospace;font-size:10px;">Running</span>
+    </div>
+    <select class="btn" id="segmentSelect" style="width:160px;cursor:pointer;">
+      <option value="all">All Segments</option>
+      <option value="straight">Straight</option>
+      <option value="turn">Normal Turn</option>
+      <option value="hairpin">Hairpin</option>
+      <option value="double_hairpin">Double Hairpin</option>
+    </select>
+    <button class="btn" id="btnPause">⏸ Pause</button>
+    <button class="btn danger" id="btnReset">↺ Reset</button>
+    <button class="btn primary" id="btnCopyYAML">Copy YAML</button>
+  </div>
+</header>
+
+<div class="dashboard">
+
+  <!-- STAT ROW -->
+  <div class="stats-row">
+    <div class="stat-card success">
+      <div class="stat-label">Speed</div>
+      <div class="stat-value" id="sSpeed">0.0<span class="stat-unit">m/s</span></div>
+      <div class="stat-sub" id="sSpeedSub">wall_follow</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Wall Error</div>
+      <div class="stat-value" id="sError">0.00<span class="stat-unit">m</span></div>
+      <div class="stat-sub">avg last 2s</div>
+    </div>
+    <div class="stat-card right-wall">
+      <div class="stat-label">Right Wall</div>
+      <div class="stat-value" id="sRightWall">—<span class="stat-unit">m</span></div>
+      <div class="stat-sub">current dist</div>
+    </div>
+    <div class="stat-card left-wall">
+      <div class="stat-label">Left Wall</div>
+      <div class="stat-value" id="sLeftWall">—<span class="stat-unit">m</span></div>
+      <div class="stat-sub">current dist</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Corridor</div>
+      <div class="stat-value" id="sCorridor">—<span class="stat-unit">m</span></div>
+      <div class="stat-sub">L + R width</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">Closest Obs.</div>
+      <div class="stat-value" id="sClosest">—<span class="stat-unit">m</span></div>
+      <div class="stat-sub" id="sMode">mode: —</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Reactive Wt</div>
+      <div class="stat-value" id="sReactive">0<span class="stat-unit">%</span></div>
+      <div class="stat-sub" id="sReactiveSub">blend ratio</div>
+    </div>
+    <div class="stat-card danger-card">
+      <div class="stat-label">Crashes</div>
+      <div class="stat-value" id="sCrashes">0</div>
+      <div class="stat-sub" id="sLastCrash">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Goal</div>
+      <div class="stat-value" id="sGoal">—<span class="stat-unit">%</span></div>
+      <div class="stat-sub" id="sGoalSub">not started</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Ku / Tu</div>
+      <div class="stat-value" id="sKuTu" style="font-size:13px;">—</div>
+      <div class="stat-sub">Ziegler-Nichols</div>
+    </div>
+  </div>
+
+  <div class="main-grid">
+
+    <!-- LEFT SIDEBAR -->
+    <div style="display:flex;flex-direction:column;gap:14px;">
+
+      <!-- PID GAINS -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-header-left">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+            PID Gains
+          </div>
+          <span style="font-size:9px;color:var(--text-dim);">Wall Follow</span>
+        </div>
+        <div class="panel-body">
+          <div class="param-row">
+            <div class="param-header">
+              <span class="param-name"><span class="dot" style="background:var(--c-P)"></span>Kp</span>
+              <input class="param-input" id="kpVal" value="0.35">
+            </div>
+            <input type="range" id="kpSlider" min="0" max="5" step="0.01" value="0.35">
+            <div class="param-hint">Proportional — how hard to correct now</div>
+          </div>
+          <div class="param-row">
+            <div class="param-header">
+              <span class="param-name"><span class="dot" style="background:var(--c-I)"></span>Ki</span>
+              <input class="param-input" id="kiVal" value="0.0293">
+            </div>
+            <input type="range" id="kiSlider" min="0" max="2" step="0.001" value="0.0293">
+            <div class="param-hint">Integral — fixes steady drift over time</div>
+          </div>
+          <div class="param-row">
+            <div class="param-header">
+              <span class="param-name"><span class="dot" style="background:var(--c-D)"></span>Kd</span>
+              <input class="param-input" id="kdVal" value="0.28">
+            </div>
+            <input type="range" id="kdSlider" min="0" max="5" step="0.01" value="0.28">
+            <div class="param-hint">Derivative — dampens overshoot &amp; oscillation</div>
+          </div>
+
+          <div class="section-divider">Wall Follow Params</div>
+          <div class="mini-grid">
+            <div class="mini-field">
+              <label>Desired Dist (m)</label>
+              <input type="number" id="desiredDist" value="2.2" step="0.1" min="0.2" max="5">
+            </div>
+            <div class="mini-field">
+              <label>Lookahead (m)</label>
+              <input type="number" id="lookahead" value="1.7" step="0.1" min="0.5" max="5">
+            </div>
+            <div class="mini-field">
+              <label>Max Speed (m/s)</label>
+              <input type="number" id="maxSpeed" value="10.0" step="0.5" min="1" max="20">
+            </div>
+            <div class="mini-field">
+              <label>Theta (deg)</label>
+              <input type="number" id="thetaDeg" value="55" step="5" min="10" max="80">
+            </div>
+          </div>
+
+          <div class="section-divider">Dual Wall Params</div>
+          <div class="param-row">
+            <div class="param-header">
+              <span class="param-name" style="font-size:10px;">Wall Blend α</span>
+              <input class="param-input" id="alphaVal" value="0.50">
+            </div>
+            <input type="range" id="alphaSlider" min="0" max="1" step="0.05" value="0.50">
+            <div class="param-hint">0 = right-wall only · 0.5 = blend · 1 = full centering</div>
+          </div>
+          <div class="mini-grid">
+            <div class="mini-field">
+              <label>Max Wall Range (m)</label>
+              <input type="number" id="maxWallRange" value="4.0" step="0.25" min="1" max="10">
+            </div>
+            <div class="mini-field">
+              <label>Min Wall Range (m)</label>
+              <input type="number" id="minWallRange" value="0.15" step="0.05" min="0.05" max="1">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- REACTIVE + BLEND -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-header-left">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
+            Reactive + Blend
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="mini-grid">
+            <div class="mini-field">
+              <label>Danger Thresh (m)</label>
+              <input type="number" id="dangerThresh" value="0.7" step="0.05" min="0.3" max="3">
+            </div>
+            <div class="mini-field">
+              <label>Blend Range (m)</label>
+              <input type="number" id="blendRange" value="0.95" step="0.05" min="0.1" max="2">
+            </div>
+            <div class="mini-field">
+              <label>Speed Min (m/s)</label>
+              <input type="number" id="speedMin" value="1.5" step="0.5" min="0" max="10">
+            </div>
+            <div class="mini-field">
+              <label>Speed Max (m/s)</label>
+              <input type="number" id="speedMax" value="5.0" step="0.5" min="1" max="20">
+            </div>
+            <div class="mini-field">
+              <label>Bubble Radius (m)</label>
+              <input type="number" id="bubbleRadius" value="0.5" step="0.05" min="0.1" max="1">
+            </div>
+            <div class="mini-field">
+              <label>Max LiDAR (m)</label>
+              <input type="number" id="maxLidar" value="5.5" step="0.5" min="1" max="15">
+            </div>
+          </div>
+
+          <div class="section-divider">Safety / AEB</div>
+          <div class="mini-grid">
+            <div class="mini-field">
+              <label>TTC Threshold (s)</label>
+              <input type="number" id="ttcThresh" value="0.35" step="0.05" min="0.1" max="2">
+            </div>
+            <div class="mini-field">
+              <label>Min Emerg. Range (m)</label>
+              <input type="number" id="minEmergRange" value="1.0" step="0.1" min="0.3" max="3">
+            </div>
+          </div>
+
+          <div class="section-divider">Simulation</div>
+          <div class="mini-grid">
+            <div class="mini-field">
+              <label>Track Segment</label>
+              <select id="wallProfile">
+                <option value="straight">Straight</option>
+                <option value="turn">Normal Turn</option>
+                <option value="hairpin" selected>Hairpin</option>
+                <option value="double_hairpin">Double Hairpin</option>
+                <option value="full_lap">Full Lap</option>
+              </select>
+            </div>
+            <div class="mini-field">
+              <label>Sim Speed ×</label>
+              <input type="number" id="simSpeed" value="1.0" step="0.25" min="0.25" max="4">
+            </div>
+          </div>
+
+          <div class="section-divider">Goal Line</div>
+          <div class="mini-grid">
+            <div class="mini-field">
+              <label>Goal Distance (m)</label>
+              <input type="number" id="goalDist" value="50" step="10" min="10" max="500">
+            </div>
+            <div class="mini-field">
+              <label>Target Avg Error (m)</label>
+              <input type="number" id="goalError" value="0.15" step="0.05" min="0.01" max="1">
+            </div>
+          </div>
+          <div class="goal-status">
+            <span style="font-size:9px;color:var(--text-dim);white-space:nowrap;" id="goalLabel">GOAL</span>
+            <div class="goal-progress-bar">
+              <div class="goal-progress-fill" id="goalBar" style="width:0%"></div>
+            </div>
+            <span style="font-family:'Space Mono',monospace;font-size:10px;color:var(--text-dim);white-space:nowrap;" id="goalPct">0%</span>
+            <button class="btn" style="font-size:9px;padding:2px 8px;" onclick="resetGoal()">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ZIEGLER-NICHOLS -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-header-left">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M12 2v20"/></svg>
+            Ziegler-Nichols Tuner
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="osc-info" id="znInfo">
+            <div class="osc-row"><span class="osc-key">Status</span><span class="osc-val" id="znStatus">Observing…</span></div>
+            <div class="osc-row"><span class="osc-key">Ku (Critical Gain)</span><span class="osc-val" id="znKu">—</span></div>
+            <div class="osc-row"><span class="osc-key">Tu (Osc. Period)</span><span class="osc-val" id="znTu">—</span></div>
+            <div class="osc-row"><span class="osc-key">Oscillation Amp</span><span class="osc-val" id="znAmp">—</span></div>
+          </div>
+          <div class="zn-box">
+            <h4>Suggested Gains</h4>
+            <div class="zn-method">
+              <span class="zn-method-name">P only</span>
+              <span class="zn-vals" id="znP">—</span>
+              <button class="zn-apply-btn" onclick="applyZN('P')">Apply</button>
+            </div>
+            <div class="zn-method">
+              <span class="zn-method-name">PI</span>
+              <span class="zn-vals" id="znPI">—</span>
+              <button class="zn-apply-btn" onclick="applyZN('PI')">Apply</button>
+            </div>
+            <div class="zn-method">
+              <span class="zn-method-name">PID (classic)</span>
+              <span class="zn-vals" id="znPID">—</span>
+              <button class="zn-apply-btn" onclick="applyZN('PID')">Apply</button>
+            </div>
+            <div class="zn-method">
+              <span class="zn-method-name">PID (some OS)</span>
+              <span class="zn-vals" id="znPIDos">—</span>
+              <button class="zn-apply-btn" onclick="applyZN('PIDos')">Apply</button>
+            </div>
+            <div class="zn-method">
+              <span class="zn-method-name">PID (no OS)</span>
+              <span class="zn-vals" id="znPIDno">—</span>
+              <button class="zn-apply-btn" onclick="applyZN('PIDno')">Apply</button>
+            </div>
+          </div>
+          <div style="font-size:9px;color:var(--text-dim);line-height:1.6;">
+            Set Ki=0, Kd=0, increase Kp until sustained oscillation appears. ZN auto-detects Ku and Tu from error signal.
+          </div>
+        </div>
+      </div>
+
+      <!-- EVENT LOG -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-header-left">⚡ Event Log</div>
+          <button class="btn" onclick="events=[];renderLog()" style="font-size:9px;padding:2px 8px;">Clear</button>
+        </div>
+        <div class="panel-body" style="padding:8px;">
+          <div class="event-log" id="eventLog"></div>
+        </div>
+      </div>
+
+      <!-- YAML -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-header-left">📄 YAML Output</div>
+        </div>
+        <div class="panel-body" style="padding:10px;">
+          <div class="yaml-block" id="yamlOutput"></div>
+        </div>
+      </div>
+
+    </div><!-- end sidebar -->
+
+    <!-- CHARTS -->
+    <div class="charts-area">
+
+      <!-- TRACK VISUALIZER -->
+      <div class="panel track-panel">
+        <div class="chart-header">
+          <span class="chart-title">🏁 Track Visualizer — Car View</span>
+          <span style="font-size:9px;color:var(--text-dim);">top-down · goal line · dual wall distances</span>
+        </div>
+        <div class="track-wrap"><canvas id="cTrack"></canvas></div>
+        <div class="track-legend">
+          <div class="track-legend-item"><div class="track-legend-swatch" style="background:#00e5ff;border-radius:50%"></div><span>Car</span></div>
+          <div class="track-legend-item"><div class="track-legend-swatch" style="background:rgba(0,229,255,0.2);border:1px solid #00e5ff"></div><span>Right Wall Beam</span></div>
+          <div class="track-legend-item"><div class="track-legend-swatch" style="background:rgba(167,139,250,0.2);border:1px solid #a78bfa"></div><span>Left Wall Beam</span></div>
+          <div class="track-legend-item"><div class="track-legend-swatch" style="background:#00e676;border-radius:50%"></div><span>Goal Line</span></div>
+          <div class="track-legend-item"><div class="track-legend-swatch" style="background:rgba(255,107,53,0.5)"></div><span>Danger Zone</span></div>
+          <div class="track-legend-item"><div class="track-legend-swatch" style="background:rgba(255,45,85,0.3)"></div><span>Crash Zone</span></div>
+        </div>
+      </div>
+
+      <!-- Chart 1: Wall Distance / Error -->
+      <div class="panel chart-panel">
+        <div class="chart-header">
+          <span class="chart-title">Wall Distance &amp; Error Response</span>
+          <span style="font-size:9px;color:var(--text-dim);">right · left · setpoint · error</span>
+        </div>
+        <div class="chart-wrap" style="height:210px;"><canvas id="c1"></canvas></div>
+        <div class="legend-bar">
+          <div class="leg-item" data-k="setpoint"><div class="leg-swatch" style="background:var(--c-setpoint);border-top:1px dashed var(--c-setpoint);height:0"></div>Setpoint</div>
+          <div class="leg-item" data-k="actual"><div class="leg-swatch" style="background:var(--c-actual)"></div>Right Dist</div>
+          <div class="leg-item" data-k="leftDist"><div class="leg-swatch" style="background:var(--c-left)"></div>Left Dist</div>
+          <div class="leg-item" data-k="error"><div class="leg-swatch" style="background:var(--c-error)"></div>Blended Error</div>
+        </div>
+        <div class="seg-legend">
+          <div class="seg-badge"><div class="seg-badge-swatch" style="background:var(--band-straight);border:1px solid var(--success);opacity:1"></div><span style="color:var(--success)">Straight</span></div>
+          <div class="seg-badge"><div class="seg-badge-swatch" style="background:var(--band-turn);border:1px solid var(--warn)"></div><span style="color:var(--warn)">Turn</span></div>
+          <div class="seg-badge"><div class="seg-badge-swatch" style="background:var(--band-hairpin);border:1px solid var(--danger)"></div><span style="color:var(--danger)">Hairpin</span></div>
+          <div class="seg-badge"><div class="seg-badge-swatch" style="background:var(--band-dhairpin);border:1px solid #a78bfa"></div><span style="color:#a78bfa">Dbl Hairpin</span></div>
+        </div>
+      </div>
+
+      <!-- Chart 2: PID Components -->
+      <div class="panel chart-panel">
+        <div class="chart-header">
+          <span class="chart-title">PID Components</span>
+          <span style="font-size:9px;color:var(--text-dim);">P · I · D contributions</span>
+        </div>
+        <div class="chart-wrap" style="height:180px;"><canvas id="c2"></canvas></div>
+        <div class="legend-bar">
+          <div class="leg-item" data-k="pterm"><div class="leg-swatch" style="background:var(--c-P)"></div>P term</div>
+          <div class="leg-item" data-k="iterm"><div class="leg-swatch" style="background:var(--c-I)"></div>I term</div>
+          <div class="leg-item" data-k="dterm"><div class="leg-swatch" style="background:var(--c-D)"></div>D term</div>
+        </div>
+      </div>
+
+      <!-- Chart 3: Steering + Speed -->
+      <div class="panel chart-panel">
+        <div class="chart-header">
+          <span class="chart-title">Control Output</span>
+          <span style="font-size:9px;color:var(--text-dim);">steering angle · speed</span>
+        </div>
+        <div class="chart-wrap" style="height:180px;"><canvas id="c3"></canvas></div>
+        <div class="legend-bar">
+          <div class="leg-item" data-k="steering"><div class="leg-swatch" style="background:var(--c-steering)"></div>Steering (°)</div>
+          <div class="leg-item" data-k="speed"><div class="leg-swatch" style="background:var(--c-speed)"></div>Speed (m/s)</div>
+        </div>
+      </div>
+
+      <!-- Chart 4: Closest + Reactive Mode -->
+      <div class="panel chart-panel">
+        <div class="chart-header">
+          <span class="chart-title">Obstacle &amp; Reactive Mode</span>
+          <span style="font-size:9px;color:var(--text-dim);">closest obstacle · reactive weight · AEB events</span>
+        </div>
+        <div class="chart-wrap" style="height:180px;"><canvas id="c4"></canvas></div>
+        <div class="legend-bar">
+          <div class="leg-item" data-k="dangerLine"><div class="leg-swatch" style="background:var(--warn);border-top:1px dashed var(--warn);height:0"></div>Danger Thresh</div>
+          <div class="leg-item" data-k="closest"><div class="leg-swatch" style="background:var(--c-closest)"></div>Closest (m)</div>
+          <div class="leg-item" data-k="reactiveW"><div class="leg-swatch" style="background:var(--c-reactive)"></div>Reactive Wt ×3</div>
+          <div class="leg-item" data-k="aeb"><div class="leg-swatch" style="background:var(--danger)"></div>AEB Event</div>
+        </div>
+      </div>
+
+      <!-- Chart 5: iTTC -->
+      <div class="panel chart-panel">
+        <div class="chart-header">
+          <span class="chart-title">iTTC — Inverse Time to Collision</span>
+          <span style="font-size:9px;color:var(--text-dim);">lower = safer, below TTC threshold = BRAKE</span>
+        </div>
+        <div class="chart-wrap" style="height:170px;"><canvas id="c5"></canvas></div>
+        <div class="legend-bar">
+          <div class="leg-item" data-k="ittc"><div class="leg-swatch" style="background:var(--warn)"></div>Front iTTC (s)</div>
+          <div class="leg-item" data-k="ttcLine"><div class="leg-swatch" style="background:var(--danger);opacity:0.6"></div>TTC Threshold</div>
+        </div>
+      </div>
+
+    </div><!-- end charts -->
+  </div><!-- end main-grid -->
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  SIMULATION ENGINE
+// ════════════════════════════════════════════════════════════
+
+const MAX_PTS = 800;
+const DT_BASE = 0.02;
+
+let running = true;
+let simTime = 0;
+
+let integral = 0, prevError = 0;
+let wallDistRight = 2.2, wallDistLeft = 2.2, carAngle = 0;
+let crashCount = 0, lastCrashTime = null;
+let znState = { crossings: [], lastSign: 0, lastPeaks: [], ku: null, tu: null };
+let events = [];
+
+// Goal tracking
+let goalDistanceTravelled = 0;
+let goalErrorAccum = 0;
+let goalSteps = 0;
+let goalAchieved = false;
+let goalAchievedTime = null;
+
+// Track path for visualizer (car world positions)
+let trackPath = []; // [{x, y, rightDist, leftDist, crash}]
+const MAX_TRACK_PTS = 600;
+
+const D = {};
+const KEYS = ['time','setpoint','actual','leftDist','error','pterm','iterm','dterm',
+               'steering','speed','closest','reactiveW','aebEvent','ittc','segType'];
+for (const k of KEYS) D[k] = [];
+
+const vis = {};
+['setpoint','actual','leftDist','error','pterm','iterm','dterm','steering','speed',
+ 'closest','reactiveW','aeb','dangerLine','ittc','ttcLine'].forEach(k => vis[k] = true);
+
+// ── Segment profiles ──────────────────────────────────────
+function getSegment(t, profile) {
+  switch(profile) {
+    case 'straight':
+      return { wallOffset: 0.05 * Math.sin(t * 0.3), segType: 0 };
+    case 'turn':
+      return { wallOffset: 0.6 * Math.sin(t * 0.5), segType: 1 };
+    case 'hairpin': {
+      const phase = (t % 8);
+      if (phase < 2) return { wallOffset: 0, segType: 0 };
+      if (phase < 5) return { wallOffset: 1.2 * Math.sin((phase-2)/3 * Math.PI), segType: 2 };
+      return { wallOffset: 0.1*Math.sin(phase), segType: 0 };
+    }
+    case 'double_hairpin': {
+      const phase = (t % 14);
+      if (phase < 1.5) return { wallOffset: 0, segType: 0 };
+      if (phase < 4) return { wallOffset: 1.1 * Math.sin((phase-1.5)/2.5 * Math.PI), segType: 2 };
+      if (phase < 5.5) return { wallOffset: 0.05, segType: 0 };
+      if (phase < 8.5) return { wallOffset: -1.0 * Math.sin((phase-5.5)/3 * Math.PI), segType: 3 };
+      return { wallOffset: 0.05 * Math.sin(phase), segType: 0 };
+    }
+    case 'full_lap':
+    default: {
+      const cycle = t % 30;
+      if (cycle < 6)  return { wallOffset: 0.05*Math.sin(cycle*0.5), segType: 0 };
+      if (cycle < 10) return { wallOffset: 0.7*Math.sin((cycle-6)/4*Math.PI), segType: 1 };
+      if (cycle < 12) return { wallOffset: 0, segType: 0 };
+      if (cycle < 16) return { wallOffset: 1.2*Math.sin((cycle-12)/4*Math.PI), segType: 2 };
+      if (cycle < 18) return { wallOffset: 0, segType: 0 };
+      if (cycle < 25) return { wallOffset: 1.0*Math.sin((cycle-18)/3.5*Math.PI), segType: 3 };
+      return { wallOffset: 0.05*Math.sin(cycle), segType: 0 };
+    }
+  }
+}
+
+// ── Main simulation step ──────────────────────────────────
+function simStep() {
+  const kp        = +id('kpSlider').value;
+  const ki        = +id('kiSlider').value;
+  const kd        = +id('kdSlider').value;
+  const desired   = +id('desiredDist').value || 2.2;
+  const lookahead = +id('lookahead').value || 1.7;
+  const maxSpeed  = +id('maxSpeed').value || 10;
+  const speedMin  = +id('speedMin').value || 1.5;
+  const speedMax  = +id('speedMax').value || 5;
+  const dangerTh  = +id('dangerThresh').value || 0.7;
+  const blendRng  = +id('blendRange').value || 0.95;
+  const ttcTh     = +id('ttcThresh').value || 0.35;
+  const minER     = +id('minEmergRange').value || 1.0;
+  const simMul    = +id('simSpeed').value || 1.0;
+  const alpha     = +id('alphaSlider').value;    // wall_blend_alpha
+  const maxWR     = +id('maxWallRange').value || 4.0;
+  const profile   = id('wallProfile').value;
+
+  const dt = DT_BASE * simMul;
+
+  const { wallOffset, segType } = getSegment(simTime, profile);
+
+  // ── Dual wall distances ──
+  // Right wall reacts to the offset; left wall is roughly the corridor minus right
+  // We simulate a corridor of (desired + opposite_desired) + perturbation
+  const corridorWidth = desired * 2.0 + 0.5; // simulated corridor
+  const rightDt = wallDistRight;
+  const leftDt  = Math.max(0.1, corridorWidth - wallDistRight);
+
+  // Check wall visibility (simulate max_wall_range clipping)
+  const rightVisible = rightDt < maxWR && rightDt > 0.1;
+  const leftVisible  = leftDt < maxWR && leftDt > 0.1;
+
+  // ── Blended error (matches Python logic) ──
+  let error;
+  if (rightVisible && leftVisible) {
+    const projRight = rightDt + lookahead * Math.sin(carAngle);
+    const projLeft  = leftDt  - lookahead * Math.sin(carAngle);
+    const rightError = desired - projRight;
+    const centerError = (rightDt - leftDt) / 2.0;
+    error = (1 - alpha) * rightError + alpha * centerError;
+    // Add segment disturbance
+    error += wallOffset * 0.25 * (1 - alpha * 0.5);
+  } else if (rightVisible) {
+    const projRight = rightDt + lookahead * Math.sin(carAngle);
+    error = desired - projRight + wallOffset * 0.25;
+  } else if (leftVisible) {
+    const projLeft = leftDt - lookahead * Math.sin(carAngle);
+    const typicalCorr = desired * 2.0;
+    const estRight = typicalCorr - projLeft;
+    error = desired - estRight + wallOffset * 0.25;
+  } else {
+    error = prevError;
+  }
+
+  const P = kp * error;
+  integral = Math.max(-10, Math.min(10, integral + error * dt));
+  const I = ki * integral;
+  const D_val = kd * (error - prevError) / Math.max(dt, 1e-6);
+  prevError = error;
+
+  let steer = P + I + D_val;
+  steer = Math.max(-Math.PI/6, Math.min(Math.PI/6, steer));
+
+  const wfSpeed = maxSpeed * Math.max(0.3, Math.min(1, Math.pow(Math.cos(steer), 3)));
+  const adaptMax = (30 - 10*(wfSpeed/maxSpeed)) * Math.PI/180;
+  steer = Math.max(-adaptMax, Math.min(adaptMax, steer));
+
+  // ── Closest obstacle sim ──
+  const cornerFactor = Math.abs(wallOffset);
+  const closest = Math.max(0.05, Math.min(rightDt, leftDt) - cornerFactor * 0.4 + 0.03*Math.random());
+
+  // ── Reactive blend ──
+  const lower = dangerTh - blendRng;
+  let rw = 0;
+  if (closest >= dangerTh) rw = 0;
+  else if (closest <= lower) rw = 1;
+  else rw = 1 - (closest - lower) / blendRng;
+
+  const steerMag = Math.abs(steer);
+  let rgSpeed;
+  if (steerMag < 5*Math.PI/180) rgSpeed = speedMax;
+  else if (steerMag < 15*Math.PI/180) rgSpeed = speedMin + 0.7*(speedMax-speedMin);
+  else if (steerMag < 25*Math.PI/180) rgSpeed = speedMin + 0.3*(speedMax-speedMin);
+  else rgSpeed = speedMin;
+
+  const finalSpeed = (1-rw)*wfSpeed + rw*rgSpeed;
+
+  // ── iTTC ──
+  const approachRate = finalSpeed * Math.cos(steer);
+  const ittc = closest / Math.max(approachRate, 0.01);
+  const emergRange = Math.max(0.5, finalSpeed * 0.15);
+  const aebFront = ittc < ttcTh && closest < Math.max(emergRange, minER);
+
+  // ── Plant dynamics ──
+  carAngle += steer * dt * 2.0;
+  carAngle *= 0.93;
+  wallDistRight += finalSpeed * Math.sin(carAngle) * dt;
+  wallDistRight += wallOffset * dt * 0.4;
+  wallDistRight = Math.max(0.08, Math.min(corridorWidth - 0.08, wallDistRight));
+
+  // ── Crash detection ──
+  let aebEvent = 0;
+  const isCrash = wallDistRight < 0.12 || (corridorWidth - wallDistRight) < 0.12 || aebFront;
+  if (isCrash) {
+    aebEvent = 1;
+    if (!lastCrashTime || simTime - lastCrashTime > 1.0) {
+      crashCount++;
+      lastCrashTime = simTime;
+      logEvent(simTime, 'crash', `CRASH | R:${wallDistRight.toFixed(2)}m L:${(corridorWidth-wallDistRight).toFixed(2)}m`);
+    }
+  }
+
+  // ── Goal tracking ──
+  const stepDist = finalSpeed * dt;
+  goalDistanceTravelled += stepDist;
+  goalErrorAccum += Math.abs(error);
+  goalSteps++;
+
+  // ── ZN detection ──
+  const sign = Math.sign(error);
+  if (sign !== 0 && znState.lastSign !== 0 && sign !== znState.lastSign) {
+    znState.crossings.push(simTime);
+    if (znState.crossings.length > 20) znState.crossings.shift();
+    if (znState.crossings.length >= 4) {
+      const periods = [];
+      for (let i = znState.crossings.length-1; i > 0; i--) {
+        const period = 2*(znState.crossings[i] - znState.crossings[i-1]);
+        if (period > 0.1 && period < 10) periods.push(period);
+      }
+      if (periods.length >= 2) {
+        const avgPeriod = periods.reduce((a,b)=>a+b,0)/periods.length;
+        const amp = Math.max(...D.error.slice(-50).map(Math.abs));
+        if (amp > 0.05 && ki < 0.005 && kd < 0.005) {
+          znState.ku = kp;
+          znState.tu = avgPeriod;
+          znState.amp = amp;
+        }
+      }
+    }
+  }
+  znState.lastSign = sign;
+
+  // ── Track path ──
+  const lastPt = trackPath.length > 0 ? trackPath[trackPath.length-1] : {x:0,y:0};
+  const nx = lastPt.x + finalSpeed * Math.cos(carAngle + Math.PI/2) * dt;
+  const ny = lastPt.y + finalSpeed * Math.sin(carAngle + Math.PI/2) * dt;
+  trackPath.push({ x: nx, y: ny, rightDist: wallDistRight, leftDist: corridorWidth - wallDistRight, crash: isCrash, speed: finalSpeed });
+  if (trackPath.length > MAX_TRACK_PTS) trackPath.shift();
+
+  // ── Store ──
+  simTime += dt;
+  push('time', simTime);
+  push('setpoint', desired);
+  push('actual', wallDistRight);
+  push('leftDist', corridorWidth - wallDistRight);
+  push('error', error);
+  push('pterm', P);
+  push('iterm', I);
+  push('dterm', D_val);
+  push('steering', steer * 180 / Math.PI);
+  push('speed', finalSpeed);
+  push('closest', closest);
+  push('reactiveW', rw * 3);
+  push('aebEvent', aebEvent ? finalSpeed : NaN);
+  push('ittc', Math.min(ittc, 5));
+  push('segType', segType);
+}
+
+function push(k, v) {
+  D[k].push(v);
+  if (D[k].length > MAX_PTS) D[k].shift();
+}
+
+// ════════════════════════════════════════════════════════════
+//  TRACK VISUALIZER
+// ════════════════════════════════════════════════════════════
+function drawTrack() {
+  const canvas = id('cTrack');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = rect.width, H = rect.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = 'rgba(6,10,15,0.95)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = 'rgba(30,60,100,0.2)';
+  ctx.lineWidth = 1;
+  const gridStep = 40;
+  for (let x = 0; x < W; x += gridStep) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += gridStep) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  if (trackPath.length < 2) {
+    ctx.fillStyle = 'rgba(74,96,128,0.5)';
+    ctx.font = '12px Space Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Drive to see track…', W/2, H/2);
+    return;
+  }
+
+  // Auto-scale to fit path
+  const xs = trackPath.map(p => p.x);
+  const ys = trackPath.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const rangeX = Math.max(maxX - minX, 5);
+  const rangeY = Math.max(maxY - minY, 5);
+  const pad = 50;
+  const scaleX = (W - pad*2) / rangeX;
+  const scaleY = (H - pad*2) / rangeY;
+  const scale = Math.min(scaleX, scaleY);
+  const offX = pad + (W - pad*2 - rangeX*scale) / 2 - minX*scale;
+  const offY = pad + (H - pad*2 - rangeY*scale) / 2 - minY*scale;
+
+  const toSX = x => x*scale + offX;
+  const toSY = y => y*scale + offY;
+
+  // ── Corridor walls (right and left) ──
+  const desired = +id('desiredDist').value || 2.2;
+  const dangerTh = +id('dangerThresh').value || 0.7;
+
+  // Draw danger zone fill along path
+  if (trackPath.length > 1) {
+    ctx.save();
+    // Right wall danger
+    ctx.beginPath();
+    for (let i = 0; i < trackPath.length; i++) {
+      const pt = trackPath[i];
+      // Perpendicular to travel direction
+      const next = trackPath[Math.min(i+1, trackPath.length-1)];
+      const prev = trackPath[Math.max(i-1, 0)];
+      const dx = next.x - prev.x, dy = next.y - prev.y;
+      const len = Math.sqrt(dx*dx+dy*dy) || 1;
+      const nx2 = -dy/len, ny2 = dx/len; // right normal
+      const rx = toSX(pt.x + nx2 * pt.rightDist);
+      const ry = toSY(pt.y + ny2 * pt.rightDist);
+      if (i===0) ctx.moveTo(rx, ry); else ctx.lineTo(rx, ry);
+    }
+    ctx.strokeStyle = 'rgba(0,229,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4,4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i < trackPath.length; i++) {
+      const pt = trackPath[i];
+      const next = trackPath[Math.min(i+1, trackPath.length-1)];
+      const prev = trackPath[Math.max(i-1, 0)];
+      const dx = next.x - prev.x, dy = next.y - prev.y;
+      const len = Math.sqrt(dx*dx+dy*dy) || 1;
+      const nx2 = dy/len, ny2 = -dx/len; // left normal
+      const lx = toSX(pt.x + nx2 * pt.leftDist);
+      const ly = toSY(pt.y + ny2 * pt.leftDist);
+      if (i===0) ctx.moveTo(lx, ly); else ctx.lineTo(lx, ly);
+    }
+    ctx.strokeStyle = 'rgba(167,139,250,0.3)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4,4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // ── Car trail (colored by speed) ──
+  for (let i = 1; i < trackPath.length; i++) {
+    const pt = trackPath[i];
+    const prev = trackPath[i-1];
+    const t = Math.min(pt.speed / (+id('maxSpeed').value || 10), 1);
+    const r = Math.round(255 * (1-t));
+    const g = Math.round(200 * t);
+    const b = Math.round(255 * t);
+    ctx.strokeStyle = pt.crash ? '#ff2d55' : `rgba(${r},${g},${b},0.8)`;
+    ctx.lineWidth = pt.crash ? 3 : 2;
+    ctx.beginPath();
+    ctx.moveTo(toSX(prev.x), toSY(prev.y));
+    ctx.lineTo(toSX(pt.x), toSY(pt.y));
+    ctx.stroke();
+  }
+
+  // ── Goal line ──
+  const goalDist = +id('goalDist').value || 50;
+  if (goalDistanceTravelled > 0) {
+    // Find point along path at goalDist distance
+    let accDist = 0;
+    let goalPt = null;
+    for (let i = 1; i < trackPath.length; i++) {
+      const dx = trackPath[i].x - trackPath[i-1].x;
+      const dy = trackPath[i].y - trackPath[i-1].y;
+      accDist += Math.sqrt(dx*dx+dy*dy);
+      if (accDist >= goalDist && !goalPt) {
+        goalPt = trackPath[i];
+        break;
+      }
+    }
+
+    if (goalPt) {
+      // Draw goal gate
+      const gx = toSX(goalPt.x), gy = toSY(goalPt.y);
+      ctx.save();
+      ctx.strokeStyle = goalAchieved ? '#ffd32a' : '#00e676';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = goalAchieved ? '#ffd32a' : '#00e676';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.moveTo(gx - 15, gy - 15);
+      ctx.lineTo(gx + 15, gy + 15);
+      ctx.moveTo(gx + 15, gy - 15);
+      ctx.lineTo(gx - 15, gy + 15);
+      ctx.stroke();
+      // Circle
+      ctx.beginPath();
+      ctx.arc(gx, gy, 10, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Label
+      ctx.fillStyle = goalAchieved ? '#ffd32a' : '#00e676';
+      ctx.font = 'bold 10px Space Mono, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`GOAL ${goalDist}m`, gx, gy - 16);
+    }
+  }
+
+  // ── Start marker ──
+  if (trackPath.length > 0) {
+    const sp = trackPath[0];
+    ctx.fillStyle = 'rgba(0,229,255,0.3)';
+    ctx.strokeStyle = '#00e5ff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(toSX(sp.x), toSY(sp.y), 5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // ── Car (current position) ──
+  if (trackPath.length > 0) {
+    const cp = trackPath[trackPath.length-1];
+    const cx = toSX(cp.x), cy = toSY(cp.y);
+
+    // Danger radius
+    const dangerR = dangerTh * scale;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, dangerR);
+    grad.addColorStop(0, 'rgba(255,107,53,0.15)');
+    grad.addColorStop(0.6, 'rgba(255,107,53,0.08)');
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, dangerR, 0, Math.PI*2);
+    ctx.fill();
+
+    // Car body
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(carAngle);
+    ctx.fillStyle = '#00e5ff';
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur = 16;
+    ctx.fillRect(-5, -8, 10, 16);
+    // Direction indicator
+    ctx.fillStyle = '#ffd32a';
+    ctx.fillRect(-3, -12, 6, 5);
+    ctx.restore();
+
+    // Right wall beam
+    const next2 = trackPath.length > 1 ? trackPath[trackPath.length-2] : { x: cp.x, y: cp.y - 1 };
+    const dxc = cp.x - next2.x, dyc = cp.y - next2.y;
+    const lenc = Math.sqrt(dxc*dxc+dyc*dyc) || 1;
+    const rnx = -dyc/lenc, rny = dxc/lenc;
+    ctx.strokeStyle = 'rgba(0,229,255,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3,3]);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + rnx*cp.rightDist*scale, cy + rny*cp.rightDist*scale);
+    ctx.stroke();
+    // Left wall beam
+    ctx.strokeStyle = 'rgba(167,139,250,0.5)';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx - rnx*cp.leftDist*scale, cy - rny*cp.leftDist*scale);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Distance labels
+    ctx.fillStyle = '#00e5ff';
+    ctx.font = '9px Space Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(cp.rightDist.toFixed(2)+'m', cx + rnx*cp.rightDist*scale/2, cy + rny*cp.rightDist*scale/2 - 4);
+    ctx.fillStyle = '#a78bfa';
+    ctx.fillText(cp.leftDist.toFixed(2)+'m', cx - rnx*cp.leftDist*scale/2, cy - rny*cp.leftDist*scale/2 - 4);
+  }
+
+  // ── Goal achieved flash ──
+  if (goalAchieved) {
+    ctx.fillStyle = 'rgba(255,211,42,0.08)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffd32a';
+    ctx.font = 'bold 18px Space Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('🏁 GOAL REACHED!', W/2, 30);
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  CHART RENDERER
+// ════════════════════════════════════════════════════════════
+const SEG_COLORS = [
+  'rgba(0,230,118,0.07)',
+  'rgba(255,107,53,0.07)',
+  'rgba(255,45,85,0.10)',
+  'rgba(167,139,250,0.10)',
+];
+
+function drawChart(canvasId, seriesDefs, opts = {}) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = rect.width, H = rect.height;
+  const pad = { top: 18, right: 14, bottom: 26, left: 52 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top  - pad.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const n = D.time.length;
+  if (n < 2) return;
+
+  let yMin = opts.yMin !== undefined ? opts.yMin :  Infinity;
+  let yMax = opts.yMax !== undefined ? opts.yMax : -Infinity;
+  if (opts.yMin === undefined || opts.yMax === undefined) {
+    for (const s of seriesDefs) {
+      if (!vis[s.k]) continue;
+      for (const v of s.data) {
+        if (!isNaN(v) && isFinite(v)) {
+          if (v < yMin) yMin = v;
+          if (v > yMax) yMax = v;
+        }
+      }
+    }
+    const m = (yMax - yMin) * 0.15 || 0.5;
+    yMin -= m; yMax += m;
+  }
+
+  if (!isFinite(yMin) || !isFinite(yMax)) return;
+  if (yMax === yMin) { yMax += 1; yMin -= 1; }
+
+  const tMin = D.time[0], tMax = D.time[n-1];
+  const tRange = tMax - tMin || 1;
+
+  const toX = i => pad.left + ((D.time[i] - tMin) / tRange) * pw;
+  const toY = v => pad.top + (1 - (v - yMin) / (yMax - yMin)) * ph;
+
+  if (opts.segBands && D.segType.length === n) {
+    let bandStart = 0, curSeg = D.segType[0];
+    for (let i = 1; i <= n; i++) {
+      const seg = i < n ? D.segType[i] : -1;
+      if (seg !== curSeg) {
+        const x0 = toX(bandStart), x1 = i < n ? toX(i) : pad.left + pw;
+        ctx.fillStyle = SEG_COLORS[curSeg] || 'transparent';
+        ctx.fillRect(x0, pad.top, x1-x0, ph);
+        bandStart = i;
+        curSeg = seg;
+      }
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(30,60,100,0.3)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = pad.top + (i/5)*ph;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left+pw, y); ctx.stroke();
+  }
+
+  if (yMin < 0 && yMax > 0) {
+    ctx.strokeStyle = 'rgba(30,60,100,0.5)';
+    const zy = toY(0);
+    ctx.beginPath(); ctx.moveTo(pad.left, zy); ctx.lineTo(pad.left+pw, zy); ctx.stroke();
+  }
+
+  ctx.fillStyle = '#4a6080';
+  ctx.font = '9px Space Mono';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 5; i++) {
+    const v = yMax - (i/5)*(yMax-yMin);
+    ctx.fillText(v.toFixed(1), pad.left-5, pad.top + (i/5)*ph + 3);
+  }
+
+  ctx.textAlign = 'center';
+  for (let i = 0; i <= 4; i++) {
+    const t = tMin + (i/4)*tRange;
+    ctx.fillText(t.toFixed(1)+'s', pad.left + (i/4)*pw, H-4);
+  }
+
+  for (const s of seriesDefs) {
+    if (!vis[s.k]) continue;
+    ctx.save();
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.width || 1.5;
+    ctx.globalAlpha = s.alpha || 1;
+    if (s.dashed) ctx.setLineDash([4,3]);
+    else ctx.setLineDash([]);
+
+    if (s.scatter) {
+      for (let i = 0; i < n; i++) {
+        const v = s.data[i];
+        if (!isNaN(v) && isFinite(v)) {
+          const x = toX(i), y = toY(v);
+          ctx.fillStyle = s.color;
+          ctx.globalAlpha = 0.8;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+    } else if (s.hline !== undefined) {
+      const y = toY(Math.max(yMin, Math.min(yMax, s.hline)));
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left+pw, y); ctx.stroke();
+    } else {
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < n; i++) {
+        const v = s.data[i];
+        if (isNaN(v) || !isFinite(v)) { started = false; continue; }
+        const x = toX(i), y = toY(v);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  ctx.strokeStyle = 'rgba(30,60,100,0.6)';
+  ctx.lineWidth = 1; ctx.setLineDash([]);
+  ctx.strokeRect(pad.left, pad.top, pw, ph);
+}
+
+function renderCharts() {
+  const dangerTh = +id('dangerThresh').value || 0.7;
+  const ttcTh    = +id('ttcThresh').value || 0.35;
+
+  drawChart('c1', [
+    { k:'setpoint', data: D.setpoint, color:'#a78bfa', width:1.5, dashed:true, alpha:0.7 },
+    { k:'actual',   data: D.actual,   color:'#00e5ff', width:2 },
+    { k:'leftDist', data: D.leftDist, color:'#a78bfa', width:1.5 },
+    { k:'error',    data: D.error,    color:'#ff2d55', width:1, alpha:0.7 },
+  ], { segBands: true });
+
+  drawChart('c2', [
+    { k:'pterm', data: D.pterm, color:'#ff9f43', width:1.5 },
+    { k:'iterm', data: D.iterm, color:'#a78bfa', width:1.5 },
+    { k:'dterm', data: D.dterm, color:'#00e676', width:1.5 },
+  ], {});
+
+  drawChart('c3', [
+    { k:'steering', data: D.steering, color:'#ff6b9d', width:1.5 },
+    { k:'speed',    data: D.speed,    color:'#ffd32a', width:2 },
+  ], { yMin: -35 });
+
+  drawChart('c4', [
+    { k:'dangerLine', data: D.closest, color:'#ff6b35', hline: dangerTh, width:1, dashed:true, alpha:0.5 },
+    { k:'closest',    data: D.closest,   color:'#ff6b35', width:1.5 },
+    { k:'reactiveW',  data: D.reactiveW, color:'#00e5ff', width:1.5, alpha:0.7 },
+    { k:'aeb',        data: D.aebEvent,  color:'#ff2d55', scatter:true },
+  ], { yMin: 0 });
+
+  drawChart('c5', [
+    { k:'ttcLine', data: D.ittc, color:'#ff2d55', hline: ttcTh, width:1.5, dashed:true, alpha:0.6 },
+    { k:'ittc',    data: D.ittc, color:'#ff9f43', width:2 },
+  ], { yMin: 0, yMax: 5 });
+
+  drawTrack();
+}
+
+// ════════════════════════════════════════════════════════════
+//  STATS + ZN + YAML + GOAL
+// ════════════════════════════════════════════════════════════
+function updateStats() {
+  const n = D.error.length;
+  if (n < 5) return;
+
+  const last = k => D[k][n-1];
+  const speed = last('speed');
+  const closest = last('closest');
+  const rw = last('reactiveW') / 3;
+  const segNames = ['STRAIGHT','TURN','HAIRPIN','DBL-HAIRPIN'];
+
+  id('sSpeed').innerHTML = speed.toFixed(1)+'<span class="stat-unit">m/s</span>';
+  id('sSpeedSub').textContent = segNames[last('segType')] || '—';
+
+  const slice = s => D[s].slice(-Math.min(n, 100));
+  const errSlice = slice('error');
+  const avgErr = errSlice.reduce((a,b) => a+Math.abs(b), 0) / errSlice.length;
+  id('sError').innerHTML = avgErr.toFixed(3)+'<span class="stat-unit">m</span>';
+
+  const rightDist = last('actual');
+  const leftDist  = last('leftDist');
+  id('sRightWall').innerHTML = rightDist.toFixed(2)+'<span class="stat-unit">m</span>';
+  id('sLeftWall').innerHTML  = leftDist.toFixed(2)+'<span class="stat-unit">m</span>';
+  id('sCorridor').innerHTML  = (rightDist + leftDist).toFixed(2)+'<span class="stat-unit">m</span>';
+
+  id('sClosest').innerHTML = closest.toFixed(2)+'<span class="stat-unit">m</span>';
+  id('sMode').textContent = rw < 0.01 ? 'mode: WALL_FOLLOW'
+    : rw > 0.99 ? 'mode: REACTIVE'
+    : `mode: BLEND ${(rw*100).toFixed(0)}%`;
+
+  id('sReactive').innerHTML = (rw*100).toFixed(0)+'<span class="stat-unit">%</span>';
+  const dangerTh = +id('dangerThresh').value;
+  id('sReactiveSub').textContent = closest < dangerTh ? 'in danger zone' : 'clear';
+
+  id('sCrashes').textContent = crashCount;
+  id('sLastCrash').textContent = lastCrashTime ? `last: ${lastCrashTime.toFixed(1)}s` : '—';
+
+  // Goal
+  const goalDist  = +id('goalDist').value || 50;
+  const goalErrTh = +id('goalError').value || 0.15;
+  const pct = Math.min(100, (goalDistanceTravelled / goalDist) * 100);
+  const avgGoalErr = goalSteps > 0 ? goalErrorAccum / goalSteps : Infinity;
+
+  id('goalBar').style.width = pct.toFixed(1) + '%';
+  id('goalPct').textContent = pct.toFixed(0) + '%';
+  id('sGoal').innerHTML = pct.toFixed(0)+'<span class="stat-unit">%</span>';
+
+  if (pct >= 100) {
+    if (!goalAchieved) {
+      goalAchieved = true;
+      goalAchievedTime = simTime;
+      const pass = avgGoalErr <= goalErrTh;
+      logEvent(simTime, pass ? 'ok' : 'warn',
+        `Goal: ${goalDist}m in ${simTime.toFixed(1)}s | avg err: ${avgGoalErr.toFixed(3)}m ${pass?'✓ PASS':'✗ FAIL'}`);
+    }
+    id('goalBar').style.background = avgGoalErr <= goalErrTh ? 'var(--success)' : 'var(--warn)';
+    id('sGoalSub').textContent = avgGoalErr <= goalErrTh ? '✓ PASS' : `✗ err ${avgGoalErr.toFixed(3)}m`;
+  } else {
+    id('goalBar').style.background = 'var(--success)';
+    id('sGoalSub').textContent = `${goalDistanceTravelled.toFixed(1)}/${goalDist}m`;
+  }
+
+  updateZN();
+}
+
+function resetGoal() {
+  goalDistanceTravelled = 0;
+  goalErrorAccum = 0;
+  goalSteps = 0;
+  goalAchieved = false;
+  goalAchievedTime = null;
+  id('goalBar').style.width = '0%';
+  id('goalPct').textContent = '0%';
+  logEvent(simTime, 'ok', 'Goal reset');
+}
+
+function updateZN() {
+  const kp = +id('kpSlider').value;
+  const ki = +id('kiSlider').value;
+  const kd = +id('kdSlider').value;
+
+  if (znState.ku && znState.tu) {
+    const Ku = znState.ku, Tu = znState.tu;
+    id('znStatus').textContent = 'Oscillation detected ✓';
+    id('znStatus').style.color = 'var(--success)';
+    id('znKu').textContent = Ku.toFixed(3);
+    id('znTu').textContent = Tu.toFixed(3) + ' s';
+    id('znAmp').textContent = (znState.amp||0).toFixed(3) + ' m';
+    id('sKuTu').textContent = `${Ku.toFixed(2)} / ${Tu.toFixed(2)}s`;
+
+    id('znP').textContent   = `Kp=${(0.5*Ku).toFixed(3)}`;
+    id('znPI').textContent  = `Kp=${(0.45*Ku).toFixed(3)} Ki=${(0.54*Ku/Tu).toFixed(4)}`;
+    id('znPID').textContent = `Kp=${(0.6*Ku).toFixed(3)} Ki=${(1.2*Ku/Tu).toFixed(4)} Kd=${(0.075*Ku*Tu).toFixed(3)}`;
+    id('znPIDos').textContent = `Kp=${(0.33*Ku).toFixed(3)} Ki=${(0.66*Ku/Tu).toFixed(4)} Kd=${(0.11*Ku*Tu).toFixed(3)}`;
+    id('znPIDno').textContent = `Kp=${(0.2*Ku).toFixed(3)} Ki=${(0.4*Ku/Tu).toFixed(4)} Kd=${(0.066*Ku*Tu).toFixed(3)}`;
+
+    window._znData = { Ku, Tu };
+  } else {
+    if (ki < 0.005 && kd < 0.005) {
+      id('znStatus').textContent = `Scanning… Kp=${kp.toFixed(2)}`;
+      id('znStatus').style.color = 'var(--warn)';
+    } else {
+      id('znStatus').textContent = 'Set Ki=0, Kd=0 first';
+      id('znStatus').style.color = 'var(--text-dim)';
+    }
+    id('sKuTu').textContent = '—';
+  }
+}
+
+function applyZN(method) {
+  if (!window._znData) return;
+  const { Ku, Tu } = window._znData;
+  let kp, ki, kd;
+  if (method === 'P')     { kp=0.5*Ku;  ki=0;           kd=0; }
+  if (method === 'PI')    { kp=0.45*Ku; ki=0.54*Ku/Tu;  kd=0; }
+  if (method === 'PID')   { kp=0.6*Ku;  ki=1.2*Ku/Tu;   kd=0.075*Ku*Tu; }
+  if (method === 'PIDos') { kp=0.33*Ku; ki=0.66*Ku/Tu;  kd=0.11*Ku*Tu; }
+  if (method === 'PIDno') { kp=0.2*Ku;  ki=0.4*Ku/Tu;   kd=0.066*Ku*Tu; }
+
+  setParam('kpSlider','kpVal', kp, 3);
+  setParam('kiSlider','kiVal', ki, 4);
+  setParam('kdSlider','kdVal', kd, 3);
+  logEvent(simTime, 'ok', `Applied ZN-${method}: Kp=${kp.toFixed(3)} Ki=${ki.toFixed(4)} Kd=${kd.toFixed(3)}`);
+  doReset();
+}
+
+function setParam(sliderId, inputId, val, dec) {
+  const slider = id(sliderId);
+  const input  = id(inputId);
+  const clamped = Math.max(+slider.min, Math.min(+slider.max, val));
+  slider.value = clamped;
+  input.value  = clamped.toFixed(dec);
+}
+
+function updateYAML() {
+  const v = k => id(k).value;
+  const kp = (+id('kpSlider').value).toFixed(3);
+  const ki = (+id('kiSlider').value).toFixed(4);
+  const kd = (+id('kdSlider').value).toFixed(3);
+  const alpha = (+id('alphaSlider').value).toFixed(2);
+  id('yamlOutput').innerHTML =
+    `<span class="yk">trajectory</span>:\n` +
+    `  <span class="yk">ros__parameters</span>:\n` +
+    `    <span class="yc"># PID</span>\n` +
+    `    <span class="yk">kp</span>: <span class="yv">${kp}</span>\n` +
+    `    <span class="yk">ki</span>: <span class="yv">${ki}</span>\n` +
+    `    <span class="yk">kd</span>: <span class="yv">${kd}</span>\n` +
+    `    <span class="yc"># Wall follow</span>\n` +
+    `    <span class="yk">desired_distance</span>: <span class="yv">${v('desiredDist')}</span>\n` +
+    `    <span class="yk">lookahead_distance</span>: <span class="yv">${v('lookahead')}</span>\n` +
+    `    <span class="yk">theta_deg</span>: <span class="yv">${v('thetaDeg')}</span>\n` +
+    `    <span class="yk">max_speed</span>: <span class="yv">${v('maxSpeed')}</span>\n` +
+    `    <span class="yc"># Dual wall</span>\n` +
+    `    <span class="yk">wall_blend_alpha</span>: <span class="yv">${alpha}</span>\n` +
+    `    <span class="yk">max_wall_range</span>: <span class="yv">${v('maxWallRange')}</span>\n` +
+    `    <span class="yk">min_wall_range</span>: <span class="yv">${v('minWallRange')}</span>\n` +
+    `    <span class="yc"># Reactive / Gap</span>\n` +
+    `    <span class="yk">speed_min</span>: <span class="yv">${v('speedMin')}</span>\n` +
+    `    <span class="yk">speed_max</span>: <span class="yv">${v('speedMax')}</span>\n` +
+    `    <span class="yk">bubble_radius</span>: <span class="yv">${v('bubbleRadius')}</span>\n` +
+    `    <span class="yk">max_lidar_range</span>: <span class="yv">${v('maxLidar')}</span>\n` +
+    `    <span class="yk">danger_threshold</span>: <span class="yv">${v('dangerThresh')}</span>\n` +
+    `    <span class="yk">blend_range</span>: <span class="yv">${v('blendRange')}</span>\n` +
+    `<span class="yc">\nsafety_node</span>:\n` +
+    `  <span class="yk">ros__parameters</span>:\n` +
+    `    <span class="yk">ttc_threshold</span>: <span class="yv">${v('ttcThresh')}</span>\n` +
+    `    <span class="yk">speed_threshold</span>: <span class="yv">0.5</span>`;
+}
+
+// ── Event log ──
+function logEvent(t, type, msg) {
+  events.push({ t, type, msg });
+  if (events.length > 40) events.shift();
+  renderLog();
+}
+function renderLog() {
+  const el = id('eventLog');
+  el.innerHTML = events.slice().reverse().map(e =>
+    `<div class="event-entry">
+      <span class="event-time">${e.t.toFixed(1)}s</span>
+      <span class="event-type ${e.type}">${e.type.toUpperCase()}</span>
+      <span class="event-msg">${e.msg}</span>
+    </div>`
+  ).join('');
+}
+
+// ════════════════════════════════════════════════════════════
+//  RESET + LOOP
+// ════════════════════════════════════════════════════════════
+function doReset() {
+  simTime = 0; integral = 0; prevError = 0;
+  wallDistRight = +id('desiredDist').value || 2.2;
+  wallDistLeft = wallDistRight;
+  carAngle = 0;
+  crashCount = 0; lastCrashTime = null;
+  znState = { crossings:[], lastSign:0, lastPeaks:[], ku:null, tu:null };
+  for (const k of KEYS) D[k] = [];
+  trackPath = [];
+  resetGoal();
+  logEvent(0,'ok','Reset');
+}
+
+function loop() {
+  if (running) {
+    const steps = Math.round((+id('simSpeed').value || 1) * 3);
+    for (let i = 0; i < steps; i++) simStep();
+  }
+  renderCharts();
+  updateStats();
+  updateYAML();
+  requestAnimationFrame(loop);
+}
+
+// ════════════════════════════════════════════════════════════
+//  WIRING
+// ════════════════════════════════════════════════════════════
+function id(x) { return document.getElementById(x); }
+
+function syncParam(sliderId, inputId, decimals) {
+  const sl = id(sliderId), inp = id(inputId);
+  sl.addEventListener('input', () => { inp.value = (+sl.value).toFixed(decimals); });
+  inp.addEventListener('change', () => {
+    let v = parseFloat(inp.value);
+    if (isNaN(v)) v = +sl.value;
+    v = Math.max(+sl.min, Math.min(+sl.max, v));
+    sl.value = v; inp.value = v.toFixed(decimals);
+  });
+}
+syncParam('kpSlider','kpVal',3);
+syncParam('kiSlider','kiVal',4);
+syncParam('kdSlider','kdVal',3);
+syncParam('alphaSlider','alphaVal',2);
+
+id('btnPause').addEventListener('click', () => {
+  running = !running;
+  id('btnPause').textContent = running ? '⏸ Pause' : '▶ Play';
+  id('statusDot').className = 'status-dot' + (running ? '' : ' paused');
+  id('statusText').textContent = running ? 'Running' : 'Paused';
+});
+
+id('btnReset').addEventListener('click', doReset);
+
+id('btnCopyYAML').addEventListener('click', () => {
+  const v = k => id(k).value;
+  const kp = (+id('kpSlider').value).toFixed(3);
+  const ki = (+id('kiSlider').value).toFixed(4);
+  const kd = (+id('kdSlider').value).toFixed(3);
+  const alpha = (+id('alphaSlider').value).toFixed(2);
+  const yaml = `trajectory:\n  ros__parameters:\n    kp: ${kp}\n    ki: ${ki}\n    kd: ${kd}\n    desired_distance: ${v('desiredDist')}\n    lookahead_distance: ${v('lookahead')}\n    theta_deg: ${v('thetaDeg')}\n    max_speed: ${v('maxSpeed')}\n    wall_blend_alpha: ${alpha}\n    max_wall_range: ${v('maxWallRange')}\n    min_wall_range: ${v('minWallRange')}\n    speed_min: ${v('speedMin')}\n    speed_max: ${v('speedMax')}\n    bubble_radius: ${v('bubbleRadius')}\n    max_lidar_range: ${v('maxLidar')}\n    danger_threshold: ${v('dangerThresh')}\n    blend_range: ${v('blendRange')}\nsafety_node:\n  ros__parameters:\n    ttc_threshold: ${v('ttcThresh')}\n    speed_threshold: 0.5`;
+  navigator.clipboard.writeText(yaml).then(() => {
+    const btn = id('btnCopyYAML');
+    btn.textContent = '✓ Copied!';
+    setTimeout(() => btn.textContent = 'Copy YAML', 1500);
+  });
+});
+
+document.querySelectorAll('.leg-item').forEach(el => {
+  el.addEventListener('click', () => {
+    const k = el.dataset.k;
+    vis[k] = !vis[k];
+    el.classList.toggle('off', !vis[k]);
+  });
+});
+
+id('segmentSelect').addEventListener('change', () => {
+  const val = id('segmentSelect').value;
+  if (val !== 'all') id('wallProfile').value = val;
+  doReset();
+});
+id('wallProfile').addEventListener('change', doReset);
+
+logEvent(0,'ok','Dashboard initialized — Dual Wall + Goal Line active');
+loop();
+</script>
+</body>
+</html>

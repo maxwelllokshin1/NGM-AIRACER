@@ -1,0 +1,47 @@
+// {
+//     "configurations": [
+//         {
+//             "name": "Linux",
+//             "includePath": [
+//                 "${workspaceFolder}/**"
+//             ],
+//             "defines": [],
+//             "compilerPath": "/usr/bin/clang-18",
+//             "cStandard": "c17",
+//             "cppStandard": "c++17",
+//             "intelliSenseMode": "linux-clang-x64"
+//         }
+//     ],
+//     "version": 4
+// }
+/*
+Apparently the code up there is a default settings for a basic c_cpp_propertiess.json generated from vscode....
+It guesses your operating system and automatically names the configuration "Linux"
+It grabs the first default compoler...which apparaently is clang-18????
+it sets the include path to look on your current folder ./src <---this one I think....
+
+"compileCommands": [ "${workspaceFolder}/build/compile_commands.json" ]
+that json file is a compilation database. When you compile a ROS2 workspace using colcon, you can pass a specific flag that tells the compiler to write down the exact path
+of every single library, header and dependency it touches during the build process. By linking that database to VScode,  Intellisense becomes incredibly smart
+and auto-completes everything perfectly without you having to manually type out a lot of complex paths where your header files may reside....
+to get that argument say....
+"colcon build --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+*/
+{
+    "configurations": [
+        {
+            "name": "ROS2 AI Racer",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/opt/ros/humble/include/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64",
+            "compileCommands": "/home/ubuntu/ros2_workspaces/build/compile_commands.json"
+        }
+    ],
+    "version": 4
+}
