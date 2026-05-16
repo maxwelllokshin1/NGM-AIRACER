@@ -1,0 +1,38 @@
+
+{
+  "name": "AI-Rcaer--Reference:SEC26 Dev",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "devcontainer",
+  "workspaceFolder": "/home/ubuntu",
+  "overrideCommand": false,
+  "remoteUser": "ubuntu",
+  "features": {},
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "C_Cpp.default.includePath": [
+          "/home/ubuntu/ros2_workspaces/src/**",
+          "/home/ubuntu/ros2_workspaces/install/**",
+          "/home/ubuntu/ros2_workspaces/build/**",
+          "/opt/ros/humble/include",
+          "/usr/local/include",
+          "/usr/include",
+          "/home/ubuntu/mcu_workspaces/racer_mcu/src/**",
+          "/home/ubuntu/mcu_workspaces/racer_mcu/lib/**",
+          "/home/ubuntu/mcu_workspaces/racer_mcu/extra_packages/**"
+        ],
+        "C_Cpp.default.compileCommands": "/home/ubuntu/ros2_workspaces/build/compile_commands.json",
+        "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools"
+      },
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-iot.vscode-ros",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "platformio.platformio-ide"
+      ]
+    }
+  },
+  "runServices": ["devcontainer"],
+  "shutdownAction": "none"
+}
