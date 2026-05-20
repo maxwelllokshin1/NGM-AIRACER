@@ -1,0 +1,13 @@
+reactive_node:
+  ros__parameters:
+    bubble_radius: 0.3
+
+    preprocess_conv_size: 3
+
+    max_lidar_range: 4.0
+
+    speed_min: 0.5
+    
+    speed_max: 15.0
+
+    steering_gain: 0.3
