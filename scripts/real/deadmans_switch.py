@@ -4,7 +4,7 @@ Dead man's switch — toggle autonomy on/off with the spacebar.
 
 Usage (inside the container, after sourcing ROS):
     sudo -E env PYTHONPATH=$PYTHONPATH LD_LIBRARY_PATH=$LD_LIBRARY_PATH \
-        python3 ~/scripts/deadmans_switch.py
+        python3 ~/scripts/real/deadmans_switch.py
 
 How it works:
     ACTIVE   → does nothing. Autonomy runs normally via /drive_nav → /drive.

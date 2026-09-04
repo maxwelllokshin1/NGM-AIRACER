@@ -82,9 +82,11 @@ RUN git clone -b ${ROS_DISTRO} \
     https://github.com/micro-ROS/micro_ros_setup.git \
     src/micro_ros_setup
 
-# F1Tenth + ackermann
-RUN git clone https://github.com/f1tenth/f1tenth_gym_ros.git src/f1tenth_gym_ros && \
-    git clone https://github.com/ros-drivers/ackermann_msgs.git src/ackermann_msgs
+# ackermann
+RUN git clone https://github.com/ros-drivers/ackermann_msgs.git src/ackermann_msgs
+
+# SLAM TOOLBOX
+RUN git clone -b humble https://github.com/SteveMacenski/slam_toolbox src/SLAM_TOOLBOX
 
 # LiDAR — urg_node2 with urg_library as submodule
 RUN git clone --recurse-submodules \
@@ -103,9 +105,6 @@ RUN git clone --recurse-submodules https://github.com/f1tenth/f1tenth_system.git
 RUN rm -rf src/f1tenth_system/vesc && \
     git clone -b ros2 https://github.com/f1tenth/vesc.git src/f1tenth_system/vesc
 
-# Fix f1tenth_gym_ros map path
-RUN sed -i "s|map_path: .*|map_path: '/home/${USER_NAME}/ros2_workspaces/src/f1tenth_gym_ros/maps/levine'|g" \
-    src/f1tenth_gym_ros/config/sim.yaml
 
 # =============================================================
 # 3b. Patch vesc.yaml in-place for D3542 1450KV + DS3240 40kg
@@ -169,6 +168,9 @@ RUN /bin/bash -c "\
     ros2 run micro_ros_setup build_agent.sh && \
     rm -rf microros_agent_ws/build microros_agent_ws/log"
 
+
+RUN echo 'function vnc() { bash ~/scripts/start_vnc.sh && export DISPLAY=:99; }' >> /home/${USER_NAME}/.bashrc
+    
 # =============================================================
 # 6. Shell environment
 # =============================================================
@@ -177,6 +179,9 @@ RUN echo "" >> /home/${USER_NAME}/.bashrc && \
     echo "source /home/${USER_NAME}/ros2_workspaces/install/setup.bash" >> /home/${USER_NAME}/.bashrc && \
     echo 'function vnc() { bash ~/scripts/start_vnc.sh && export DISPLAY=:99; }' >> /home/${USER_NAME}/.bashrc
 
+RUN echo "" >> /home/${USER_NAME}/.bashrc && \
+    echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /home/${USER_NAME}/.bashrc && \
+    echo "source /home/${USER_NAME}/ros2_workspaces/install/setup.bash" >> /home/${USER_NAME}/.bashrc
 # =============================================================
 # 7. PlatformIO (for embedded firmware flashing)
 # =============================================================
@@ -210,6 +215,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-rqt-graph \
     ros-humble-navigation2 \
     ros-humble-nav2-bringup \
+    ros-humble-diagnostic-updater \
     ros-humble-xacro \
     ros-humble-foxglove-bridge \
     python3-tk \
@@ -219,6 +225,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fluxbox \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Separate layer/transaction from the ROS/nav2 stack above — epiphany's
+# large webkit/gstreamer dependency chain previously caused apt's solver
+# to swap out libdiagnostic_updater.so from the same install, silently
+# breaking nav2_lifecycle_manager (map_server never got activated).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    epiphany-browser \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # yq — ARM64 binary for Jetson TX2
 RUN wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_arm64 \
     -O /usr/bin/yq && chmod +x /usr/bin/yq
@@ -226,6 +240,10 @@ RUN wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_ar
 # F1Tenth gym physics engine
 RUN git clone https://github.com/f1tenth/f1tenth_gym.git /opt/f1tenth_gym && \
     pip3 install --no-cache-dir --default-timeout=120 -e /opt/f1tenth_gym
+
+# f1tenth_gym_ros bridge dependency (package is bind-mounted at runtime, not
+# present in the image at build time, so its rosdep/pip deps must be listed here)
+RUN pip3 install --no-cache-dir transforms3d
 
 USER ${USER_NAME}
 ENTRYPOINT ["/ros_entrypoint.sh"]

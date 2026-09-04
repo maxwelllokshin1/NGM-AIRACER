@@ -2,7 +2,7 @@
 # =============================================================
 # setup_motor.sh — One-time setup for motor control inside container
 # Run this ONCE after a fresh docker-compose up -d
-# Usage: bash ~/scripts/setup_motor.sh
+# Usage: bash ~/scripts/real/setup_motor.sh
 # =============================================================
 set -e
 
@@ -85,4 +85,4 @@ fi
 
 echo ""
 echo "===== SETUP COMPLETE ====="
-echo "Now run: bash ~/scripts/start_motor.sh"
+echo "Now run: bash ~/scripts/real/start_motor.sh"

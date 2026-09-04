@@ -3,7 +3,7 @@
 Servo test script — interactively set steering angle from the terminal.
 
 Usage:
-    python3 servo_test.py
+    python3 ~/scripts/real/servo_test.py
 
 The script publishes AckermannDriveStamped to /ackermann_cmd (the topic
 ackermann_to_vesc_node subscribes to), bypassing the mux entirely.

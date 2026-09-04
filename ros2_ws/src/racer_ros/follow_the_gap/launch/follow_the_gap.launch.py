@@ -11,7 +11,9 @@ def generate_launch_description():
 
     movement_dir = get_package_share_directory('follow_the_gap')
 
-    reactive_params = os.path.join(movement_dir, 'config', 'gap_params.yaml')
+    gap_params = os.path.join(movement_dir, 'config', 'gap_params.yaml')
+    # use the slam map 
+    slam_params = os.path.join(movement_dir, 'config', 'slam_params.yaml')
 
     movement_node = Node(
         package='follow_the_gap',
@@ -19,9 +21,18 @@ def generate_launch_description():
         name='reactive_node',
         output='screen',
         emulate_tty=True,
-        parameters=[reactive_params],
+        parameters=[gap_params],
+    )
+
+    slam_node = Node(
+        package='slam_toolbox',
+        executable='async_slam_toolbox_node',
+        name='slam_toolbox',
+        output='screen',
+        parameters=[slam_params],
     )
 
     return LaunchDescription([
         movement_node,
+        # slam_node
     ])

@@ -11,12 +11,13 @@ class Monitor(Node):
         sys.stdout.write(f'DEBUGGER INITIALIZED...\n')
         
     def debug_callback(self, msg):
-        speed, steering, gap_start, gap_end, best = msg.data
+        speed, odom_speed, steering, gap_start, gap_end, best = msg.data
         gap_width = int(gap_end - gap_start + 1)
         
         line = (
             f'\r\033[K'
             f'SPEED: {speed:5.2f} | '
+            f'odom_speed: {odom_speed:5.2f} | '
             f'STEER: {steering:+6.2f} | '
             f'GAP: [{int(gap_start):4d}, {int(gap_end):4d}] (w={gap_width:4d}) | '
             f'BEST: {int(best):4d} | '

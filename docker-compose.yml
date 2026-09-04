@@ -10,6 +10,7 @@ services:
     network_mode: "host"
     dns:
       - 8.8.8.8
+    entrypoint: ["/home/ubuntu/scripts/start_container.sh"]
     environment:
       #look inside of the .env file and you will see a varibale for BUILD_TARGET!
       # Pass the DISPLAY variable from the .env file into the container
@@ -21,7 +22,7 @@ services:
       # --- Source Code (Synced with Host) ---
       # - ./ros2_ws/src:/home/ubuntu/ros2_workspaces/src/racer_ros:delegated
       - ./ros2_ws/src/racer_ros:/home/ubuntu/ros2_workspaces/src/racer_ros:delegated
-      # - ./ros2_ws/src/f1tenth_gym_ross:/home/ubuntu/ros2_workspaces/src/f1tenth_gym_ros:delegated
+      - ./ros2_ws/src/f1tenth_gym_ros:/home/ubuntu/ros2_workspaces/src/f1tenth_gym_ros:delegated
       # - ./ros2_ws/src/ackermann_msgss:/home/ubuntu/ros2_workspaces/src/ackermann_msgs:delegated
       # Ensure ROS2 workspace-level VS Code settings land at /home/ubuntu/ros2_workspaces/.vscode
       - ./ros2_ws/.vscode:/home/ubuntu/ros2_workspaces/.vscode:delegated
@@ -68,6 +69,7 @@ services:
       - mcu_build_artifacts:/mcu_build_artifacts
       - mcu_lib_external:/mcu_lib_external
       - ./mcu_ws/libs_external:/seed:ro
+      - ./ros2_ws/src:/home/ubuntu/ros2_workspaces/src
     # Entry point is defined in Dockerfile.init-bootstrap
     restart: "no"
 

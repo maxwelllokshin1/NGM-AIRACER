@@ -4,10 +4,28 @@ reactive_node:
 
     preprocess_conv_size: 3
 
-    max_lidar_range: 4.0
-
-    speed_min: 0.5
+    max_lidar_range: 3.5
     
-    speed_max: 15.0
+    speed_max: 20.0
 
-    steering_gain: 0.3
+    steering_gain: 0.4
+
+    # straightaway detection (predictive lookahead) — go full speed_max
+    # once the forward lidar cone stays clear and steering stays small
+    # for straight_confirm_frames in a row.
+    # straight_min_forward_frac is a FRACTION of max_lidar_range, not an
+    # absolute meters value — ranges are clipped to max_lidar_range, so an
+    # absolute threshold above it can never be satisfied and silently
+    # disables straight mode entirely.
+    straight_min_forward_frac: 0.75
+    straight_max_angle_deg: 6.0
+    straight_confirm_frames: 8
+
+    # lap tracking — first odom pose is the start/finish line
+    lap_leave_dist: 3.0
+    lap_return_dist: 1.5
+    lap_min_time: 5.0
+
+    # dashboard lidar view / predicted path
+    wheelbase: 0.25
+    lidar_view_every_n: 10

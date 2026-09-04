@@ -4,7 +4,7 @@ Motor test script — interactively set drive speed from the terminal.
 
 Usage:
     sudo -E env PYTHONPATH=$PYTHONPATH LD_LIBRARY_PATH=$LD_LIBRARY_PATH \
-        python3 ~/scripts/motor_test.py
+        python3 ~/scripts/real/motor_test.py
 
 Publishes AckermannDriveStamped to /ackermann_cmd (straight to
 ackermann_to_vesc_node, bypassing the mux). Steering stays at 0.

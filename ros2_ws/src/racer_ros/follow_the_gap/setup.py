@@ -15,7 +15,9 @@ setup(
         (os.path.join('share', package_name, 'launch'),
             glob(os.path.join('launch', '*launch.[pxy][yma]*'))),
         (os.path.join('share', package_name, 'config'),
-            glob(os.path.join('config', '*.yaml')))
+            glob(os.path.join('config', '*.yaml'))),
+        (os.path.join('share', package_name, 'dashboard'),
+            glob(os.path.join('dashboard', '*.html')))
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -27,7 +29,8 @@ setup(
     entry_points={
         'console_scripts': [
             'reactive_node = follow_the_gap.reactive_node:main',
-            'car_info_monitor = follow_the_gap.car_info_monitor:main'
+            'car_info_monitor = follow_the_gap.car_info_monitor:main',
+            'car_dashboard = follow_the_gap.car_dashboard:main'
         ],
     },
 )

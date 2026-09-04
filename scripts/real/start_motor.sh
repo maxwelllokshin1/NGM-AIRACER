@@ -2,7 +2,7 @@
 # =============================================================
 # start_motor.sh — Launch motor control with Xbox controller
 # Run this every time you want to drive
-# Usage: bash ~/scripts/start_motor.sh
+# Usage: bash ~/scripts/real/start_motor.sh
 # =============================================================
 
 echo "===== STARTING MOTOR CONTROL ====="
@@ -23,4 +23,4 @@ echo ""
 echo "Starting VESC nodes..."
 
 sudo -E env PYTHONPATH=$PYTHONPATH LD_LIBRARY_PATH=$LD_LIBRARY_PATH PATH=$PATH \
-    ros2 launch ~/scripts/motor_test_launch.py
+    ros2 launch ~/scripts/real/motor_test_launch.py
