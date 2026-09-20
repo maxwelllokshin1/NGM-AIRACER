@@ -3,8 +3,9 @@ from rclpy.node import Node
 import numpy as np
 from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Empty
 from nav_msgs.msg import Odometry
+from rcl_interfaces.msg import SetParametersResult
 
 class ReactiveFollowGap(Node):
     def __init__(self):
@@ -12,11 +13,19 @@ class ReactiveFollowGap(Node):
         
         # /////////// declaring the params \\\\\\\\\\
         self.declare_parameter('bubble_radius', 0.3) # in meters
-        self.declare_parameter('preporcess_conv_size', 3) # the window to average values
+        self.declare_parameter('preprocess_conv_size', 3) # the window to average values
         self.declare_parameter('max_lidar_range', 3.0) # meters
         self.declare_parameter('speed_max', 2.0)
         self.declare_parameter('steering_gain', 1.0) # proportional gain
         self.declare_parameter('max_steering', 30.0) # proportional gain
+
+        # ── steering low-pass (dynamic alpha) ──
+        self.declare_parameter('alpha_straight', 0.8) # heavy smoothing when the target angle is small
+        self.declare_parameter('alpha_curve', 0.35) # light smoothing when the target angle is large — reacts fast
+
+        # ── how far around bends the car can "see" and react to ──
+        self.declare_parameter('fov_deg', 70.0) # degrees, EACH side of center (was hardcoded 100 — wide enough to see through bends and start turning toward them early)
+        self.declare_parameter('gap_aim_aggressiveness', 0.5) # 0 = always aim at the gap's center (immediate corridor); 1 = original behavior (aim at the furthest visible point, which is often down the next corridor segment on a bend)
 
         # ── straightaway detection (predictive lookahead) ──
         # fraction of max_lidar_range, not an absolute meters value — ranges
@@ -24,8 +33,8 @@ class ReactiveFollowGap(Node):
         # absolute threshold above max_lidar_range would be unsatisfiable
         # and silently disable straight mode entirely
         self.declare_parameter('straight_min_forward_frac', 0.75)
-        self.declare_parameter('straight_max_angle_deg', 6.0) # current steering must be under this too
-        self.declare_parameter('straight_confirm_frames', 8) # consecutive frames before locking in straight mode
+        self.declare_parameter('straight_max_angle_deg', 6.0) # steering EMA must be under this to count as "open"
+        self.declare_parameter('straight_ema_alpha', 0.2) # smoothing on the steering-magnitude EMA (higher = reacts faster)
 
         # ── lap tracking ──
         self.declare_parameter('lap_leave_dist', 3.0) # meters — must get this far from start before a lap can arm
@@ -36,23 +45,31 @@ class ReactiveFollowGap(Node):
         self.declare_parameter('wheelbase', 0.25) # meters — matches f1tenth_stack/config/vesc.yaml
         self.declare_parameter('lidar_view_every_n', 10) # publish /lidar_view every Nth scan (throttle)
 
+        # ── recovery (backing out after getting stuck) ──
+        self.declare_parameter('recovery_straight_time', 0.8) # seconds — reverse straight first, before steering, to get clear of the wall
+        self.declare_parameter('recovery_clear_dist', 1.0) # meters — average space needed on BOTH sides to call it clear
+        self.declare_parameter('recovery_max_time', 6.0) # seconds — safety cap so it can never reverse forever
+
         # ////////// get parameters (just retrieving what was previously declared) \\\\\\\\\
         self.bubble_radius = self.get_parameter('bubble_radius').value
-        self.preporcess_conv_size = self.get_parameter('preporcess_conv_size').value
+        self.preprocess_conv_size = self.get_parameter('preprocess_conv_size').value
         self.max_lidar_range = self.get_parameter('max_lidar_range').value
         self.speed_max = self.get_parameter('speed_max').value
         self.steering_gain = self.get_parameter('steering_gain').value
         self.current_speed = 0.0
         self.max_steering = np.deg2rad(self.get_parameter('max_steering').value)
-        self.fov = np.deg2rad(100) # how much we want the car to see infront of it
+        self.alpha_straight = self.get_parameter('alpha_straight').value
+        self.alpha_curve = self.get_parameter('alpha_curve').value
+        self.fov = np.deg2rad(self.get_parameter('fov_deg').value) # how much we want the car to see infront of it
+        self.gap_aim_aggressiveness = self.get_parameter('gap_aim_aggressiveness').value
         self.prev_steering = 0.0
         self.steering_smoothing = 0.6
         self.recovery_start_time = None
 
         self.straight_min_forward_frac = self.get_parameter('straight_min_forward_frac').value
         self.straight_max_angle = np.deg2rad(self.get_parameter('straight_max_angle_deg').value)
-        self.straight_confirm_frames = self.get_parameter('straight_confirm_frames').value
-        self.straight_streak = 0
+        self.straight_ema_alpha = self.get_parameter('straight_ema_alpha').value
+        self.straight_angle_ema = 0.0
         self.in_straight_mode = False
 
         self.lap_leave_dist = self.get_parameter('lap_leave_dist').value
@@ -68,6 +85,11 @@ class ReactiveFollowGap(Node):
         self.wheelbase = self.get_parameter('wheelbase').value
         self.lidar_view_every_n = self.get_parameter('lidar_view_every_n').value
         self.lidar_view_counter = 0
+
+        self.recovery_straight_time = self.get_parameter('recovery_straight_time').value
+        self.recovery_clear_dist = self.get_parameter('recovery_clear_dist').value
+        self.recovery_max_time = self.get_parameter('recovery_max_time').value
+        self.recovery_steering = 0.0
         
         # /////////// FOR ODOM \\\\\\\\\\\\
         self.actual_speed = 0.0
@@ -86,6 +108,7 @@ class ReactiveFollowGap(Node):
         # what the lidar produces
         self.lidar_sub = self.create_subscription(LaserScan, lidarscan_topic, self.lidar_callback, 10) # 10 for the refresh rate
         self.odom_sub = self.create_subscription(Odometry, '/ego_racecar/odom',self.odom_callback, 10)
+        self.reset_sub = self.create_subscription(Empty, '/reactive_reset', self.reset_callback, 10)
         
         # /////// pubs \\\\\\\
         # the commands for driving (steering / speed)
@@ -94,7 +117,13 @@ class ReactiveFollowGap(Node):
         self.lap_pub = self.create_publisher(Float32MultiArray, '/lap_info', 10)
         self.lidar_view_pub = self.create_publisher(Float32MultiArray, '/lidar_view', 10)
 
-        
+        # dashboard live tuner — setting a parameter through the standard
+        # ROS2 parameter service only updates this node's internal
+        # parameter STORAGE, not the self.xxx attributes read below, which
+        # were only pulled out once at startup. Without this callback the
+        # tuner would report "applied" but silently do nothing.
+        self.add_on_set_parameters_callback(self.on_parameter_update)
+
         # ////////// DEBUGGER \\\\\\\\\
         self.get_logger().info("\/"*15)
         self.get_logger().info(f"Bubble: {self.bubble_radius}m")
@@ -154,6 +183,80 @@ class ReactiveFollowGap(Node):
         ]
         self.lap_pub.publish(lap_msg)
 
+    def reset_callback(self, msg):
+        # dashboard's Restart button — repositioning the car (via
+        # /initialpose, handled by gym_bridge) doesn't touch any of this
+        # node's own state, so without this a "restart" would still carry
+        # over the old lap count, stuck counter, recovery flags, etc.
+        # start_pos is deliberately NOT cleared — it's the spawn point,
+        # which doesn't change between restarts, so it stays valid.
+        self.prev_steering = 0.0
+        self.current_speed = 0.0
+        self.stuck_counter = 0
+        self.is_recovering = False
+        self.post_recovery_counter = 0
+        self.post_recovery_bias = 0.0
+        self.straight_angle_ema = 0.0
+        self.in_straight_mode = False
+        self.lap_count = 0
+        self.has_left_start = False
+        self.lap_start_time = self.get_clock().now()
+        self.last_lap_time = 0.0
+        self.best_lap_time = None
+        self.get_logger().info('State reset (dashboard restart)')
+
+    def on_parameter_update(self, params):
+        # keeps the self.xxx attributes (what the rest of this file
+        # actually reads every frame) in sync with whatever the tuner just
+        # set through the standard ROS2 parameter service. A few of these
+        # are stored pre-converted (degrees -> radians), so this mirrors
+        # the same conversion done for them in __init__.
+        for p in params:
+            name, value = p.name, p.value
+            if name == 'bubble_radius':
+                self.bubble_radius = value
+            elif name == 'preprocess_conv_size':
+                self.preprocess_conv_size = value
+            elif name == 'max_lidar_range':
+                self.max_lidar_range = value
+            elif name == 'speed_max':
+                self.speed_max = value
+            elif name == 'steering_gain':
+                self.steering_gain = value
+            elif name == 'max_steering':
+                self.max_steering = np.deg2rad(value)
+            elif name == 'alpha_straight':
+                self.alpha_straight = value
+            elif name == 'alpha_curve':
+                self.alpha_curve = value
+            elif name == 'fov_deg':
+                self.fov = np.deg2rad(value)
+            elif name == 'gap_aim_aggressiveness':
+                self.gap_aim_aggressiveness = value
+            elif name == 'straight_min_forward_frac':
+                self.straight_min_forward_frac = value
+            elif name == 'straight_max_angle_deg':
+                self.straight_max_angle = np.deg2rad(value)
+            elif name == 'straight_ema_alpha':
+                self.straight_ema_alpha = value
+            elif name == 'lap_leave_dist':
+                self.lap_leave_dist = value
+            elif name == 'lap_return_dist':
+                self.lap_return_dist = value
+            elif name == 'lap_min_time':
+                self.lap_min_time = value
+            elif name == 'wheelbase':
+                self.wheelbase = value
+            elif name == 'lidar_view_every_n':
+                self.lidar_view_every_n = value
+            elif name == 'recovery_straight_time':
+                self.recovery_straight_time = value
+            elif name == 'recovery_clear_dist':
+                self.recovery_clear_dist = value
+            elif name == 'recovery_max_time':
+                self.recovery_max_time = value
+        return SetParametersResult(successful=True)
+
     def preprocess_lidar(self, ranges):
         # preprocess the lidar scan array
         
@@ -165,7 +268,7 @@ class ReactiveFollowGap(Node):
         
         # mean each value in range -> [inside that window]
         # moving average
-        weights = np.repeat(1.0, self.preporcess_conv_size) / self.preporcess_conv_size
+        weights = np.repeat(1.0, self.preprocess_conv_size) / self.preprocess_conv_size
         processed_ranges = np.convolve(processed_ranges, weights, 'same') # makes sure that average is only calculated when window fully overlaps
         
         # ----------------------------------------------
@@ -241,7 +344,7 @@ class ReactiveFollowGap(Node):
         else:
             self.stuck_counter = max(0, self.stuck_counter - 1)  # decay instead of hard reset
 
-        if self.recovery_logic(): return
+        if self.recovery_logic(processed_ranges): return
 
         # TODO: find best point in gap
         # find the max value in the gap
@@ -252,8 +355,15 @@ class ReactiveFollowGap(Node):
         # convert index to angle
         angle_to_best = data.angle_min + (best_index+start) * data.angle_increment
         
-        # gain is more aggressive at sharper turns
-        gain = self.steering_gain * (1.5 - 0.5 * (abs(angle_to_best) / self.max_steering))
+        # gain is more aggressive at sharper turns — this used to be
+        # backwards (1.5 - 0.5*frac gives its MAX multiplier at frac=0,
+        # i.e. dead straight), so any noise-driven wobble on a straight
+        # was getting amplified up to 1.5x while real sharp turns only
+        # got 1.0x. Flipped so small angles are damped (1.0x) and sharp
+        # turns get the full boost (1.5x), matching what this comment
+        # always said it should do.
+        angle_frac = np.clip(abs(angle_to_best) / self.max_steering, 0.0, 1.0)
+        gain = self.steering_gain * (1.0 + 0.5 * angle_frac)
         
         # steering gain
         steering_angle = gain * angle_to_best
@@ -263,9 +373,17 @@ class ReactiveFollowGap(Node):
         
         # LOW PASS FILTER (used in sensor fusion)
         # allows slow, steady signals to pass while blocking higher frequency noise
-        
+
         # angle = alpha * current + (1 - alpha) * angle
-        alpha = 0.8 # smoothing on straights / non on corners
+        # dynamic alpha: this comment always said "smoothing on straights /
+        # non on corners" but alpha was hardcoded to 0.8 everywhere, so the
+        # car was just as heavily smoothed (and laggy) entering a bend as
+        # on a straight. Scale it by how sharp THIS frame's raw target
+        # angle already is — small target angle (straight ahead) -> heavy
+        # smoothing for stability; large target angle (curve) -> light
+        # smoothing so it actually reacts instead of lagging behind.
+        curve_frac = np.clip(abs(steering_angle) / self.max_steering, 0.0, 1.0)
+        alpha = self.alpha_straight - (self.alpha_straight - self.alpha_curve) * curve_frac
 
 
         old_steering = self.prev_steering
@@ -302,22 +420,26 @@ class ReactiveFollowGap(Node):
         # more steering -> slower speeds
         # PURE PURSUIT METHOD (speed = max * cos(angle)^2 * distance)
 
-        # ── straightaway detection: predictive lookahead ──
-        # min_forward already looks ~25deg ahead of the car. Combined with
-        # a small CURRENT steering angle, a long clear forward range means
-        # the track is straight here — not just that this one frame
-        # happened to compute a small angle. straight_streak debounces it
-        # so a single noisy frame can't unlock/relock max speed; without
-        # this, distance_factor (capped by max_lidar_range, which is often
-        # short) keeps throttling speed even on genuine straights.
-        straight_frame = (min_forward > self.straight_min_forward_frac * self.max_lidar_range) and (abs(steering_angle) < self.straight_max_angle)
-        self.straight_streak = min(self.straight_streak + 1, self.straight_confirm_frames) if straight_frame else 0
-        self.in_straight_mode = self.straight_streak >= self.straight_confirm_frames
+        # ── straightaway detection: predictive lookahead, continuous blend ──
+        # min_forward already looks ~25deg ahead of the car. A per-frame
+        # streak that resets to 0 on ANY single noisy frame is fragile —
+        # steering jitters a little frame to frame even on a real straight,
+        # so it can rarely accumulate enough consecutive "clean" frames to
+        # ever unlock. An EMA of steering magnitude smooths that noise out
+        # instead of throwing away all progress on one bad frame, and speed
+        # blends continuously toward speed_max as the corridor opens up —
+        # no hard on/off switch, so it doesn't need a "perfect" streak to
+        # actually reach a noticeably higher speed.
+        self.straight_angle_ema = (1 - self.straight_ema_alpha) * self.straight_angle_ema + self.straight_ema_alpha * abs(steering_angle)
 
-        if self.in_straight_mode:
-            speed = self.speed_max
-        else:
-            speed = self.speed_max * (np.cos(steering_angle)**4) * distance_factor # we want to lower the speed based on how close the object infront of us is
+        forward_threshold = self.straight_min_forward_frac * self.max_lidar_range
+        forward_openness = np.clip(min_forward / forward_threshold, 0.0, 1.0) if forward_threshold > 0 else 1.0
+        angle_openness = np.clip(1.0 - (self.straight_angle_ema / self.straight_max_angle), 0.0, 1.0)
+        openness = forward_openness * angle_openness  # both need to be good — wide open lane at an angle isn't "straight"
+        self.in_straight_mode = openness > 0.8  # kept for the brake/boost guard below + future telemetry
+
+        reactive_speed = self.speed_max * (np.cos(steering_angle)**4) * distance_factor # we want to lower the speed based on how close the object infront of us is
+        speed = reactive_speed + (self.speed_max - reactive_speed) * openness
 
         steering_delta = steering_angle - old_steering
 
@@ -385,46 +507,66 @@ class ReactiveFollowGap(Node):
         self.debug_pub.publish(debugging_message)
 
 
-    def recovery_logic(self, steering_angle = np.deg2rad(30)):
+    def _side_clearance(self, processed_ranges):
+        # higher indices = left, lower indices = right (matches angle
+        # increasing counterclockwise with index, same convention used
+        # for `mid` elsewhere in this file)
+        n = len(processed_ranges)
+        right_half = processed_ranges[:n // 2]
+        left_half = processed_ranges[n // 2:]
+        right_nonzero = right_half[right_half > 0]
+        left_nonzero = left_half[left_half > 0]
+        right_space = float(np.mean(right_nonzero)) if len(right_nonzero) > 0 else 0.0
+        left_space = float(np.mean(left_nonzero)) if len(left_nonzero) > 0 else 0.0
+        return left_space, right_space
+
+    def recovery_logic(self, processed_ranges):
         if self.stuck_counter > self.stuck_threshold and not self.is_recovering:
-            self.get_logger().warning("WE ARE STUCK - locking the angle...")
             self.is_recovering = True
-            self.recovery_counter = 0
             self.recovery_start_time = self.get_clock().now()
 
-            # # mirror the last steering direction in reverse
-            # self.recovery_steering = -self.prev_steering
-            # if abs(self.recovery_steering) < 0.15:
-            #     self.recovery_steering = self.max_steering
-        
-        # backup briefly then resume normal driving
+            # steer away from whichever side is actually tighter, instead
+            # of a fixed hardcoded direction — that was the bug: it always
+            # reversed the same way regardless of which side the car
+            # actually hit, sometimes steering straight back into the wall
+            left_space, right_space = self._side_clearance(processed_ranges)
+            self.recovery_steering = -self.max_steering if right_space < left_space else self.max_steering
+            self.get_logger().warning(
+                f"WE ARE STUCK - reversing {'left' if self.recovery_steering > 0 else 'right'} "
+                f"(L:{left_space:.2f}m R:{right_space:.2f}m)"
+            )
+
         if self.is_recovering:
             elapsed = (self.get_clock().now() - self.recovery_start_time).nanoseconds / 1e9
-            
             reverse_speed = -0.5
 
-            if elapsed < 1.0: # reverse straight
+            if elapsed < self.recovery_straight_time:
+                # phase 1: straighten out and get some distance from the
+                # wall before committing to a steered direction
                 self._publish_reverse(0.0, reverse_speed)
-                self.get_logger().warn(f'reversing straight {self.current_speed} | {self.actual_speed}')
-                self.get_logger().warn(
-                    f"RECOVERY CMD: {np.rad2deg(steering_angle):.1f}"
-                )
                 return True
-            elif elapsed < 3.0: # reverse straight
-                self._publish_reverse(steering_angle, reverse_speed)
-                self.get_logger().warn(f'reversing at angle {np.rad2deg(steering_angle)} | {self.current_speed} | {self.actual_speed}')
-                self.get_logger().warn(
-                    f"RECOVERY CMD: {np.rad2deg(steering_angle):.1f}"
-                )
-                return True
-            else:
+
+            # closed-loop exit check — keep backing out until BOTH sides
+            # actually measure clear, not just "some fixed number of
+            # seconds passed" (which was letting it exit while still
+            # wedged against the wall and immediately re-trigger recovery)
+            left_space, right_space = self._side_clearance(processed_ranges)
+            both_sides_clear = left_space > self.recovery_clear_dist and right_space > self.recovery_clear_dist
+
+            if both_sides_clear or elapsed > self.recovery_max_time:
                 self.is_recovering = False
                 self.stuck_counter = -100
-                self.post_recovery_bias = 0.0  # capture BEFORE zeroing
+                # small nudge away from the side we just recovered from,
+                # so normal driving doesn't immediately drift back into it
+                self.post_recovery_bias = 0.3 if self.recovery_steering > 0 else -0.3
                 self.post_recovery_counter = 40
-                # self.recovery_steering = 0.0  # zero AFTER
-                self.get_logger().warn(f'done recovering')
+                reason = 'clear on both sides' if both_sides_clear else 'hit max recovery time'
+                self.get_logger().warn(f'done recovering ({reason}) L:{left_space:.2f}m R:{right_space:.2f}m')
                 return False
+
+            self._publish_reverse(self.recovery_steering, reverse_speed)
+            return True
+
         return False
                 
         
@@ -498,11 +640,23 @@ class ReactiveFollowGap(Node):
         
         # aggression score chooses how to tune the individual weights
         aggression = 0.4 * width_score + 0.4 * depth_score + 0.2 * safety_score
-        
-        # alpha should depend on current speed
-        speed_factor = 1.0 - (self.current_speed / self.speed_max) # slow == 1, fast == 0
+
+        # alpha should depend on current speed — fast means we're already
+        # committed on a clear stretch, so aiming at the deep point is fine;
+        # slow means we're likely approaching or already in a corner, so
+        # stay centered on the immediate corridor instead of reaching for
+        # a far point that might be down the NEXT segment past the bend.
+        # (this was previously inverted — slow used to mean MORE aggressive
+        # far-aiming, which is exactly backwards and was cutting corners
+        # early right as the car naturally slowed for them.)
+        speed_factor = self.current_speed / self.speed_max # fast == 1, slow == 0
         alpha = np.clip(aggression * 0.5 + speed_factor * 0.5, 0.0, 1.0)
-        
+
+        # overall dial on how much to ever trust "aim at the furthest
+        # point" vs. just following the immediate gap center — see
+        # gap_aim_aggressiveness in gap_params.yaml
+        alpha *= self.gap_aim_aggressiveness
+
         return int(alpha * furthest_index + (1 - alpha) * centered_index)
     
     def publish_drive(self, steering_angle, speed):
