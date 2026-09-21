@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sensor Dashboard</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --accent: #2a78d6;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+  --pt-near: #104281;   /* blue ramp 650 -> 500 -> 250: near points darkest on light */
+  --pt-mid: #256abf;
+  --pt-far: #86b6ef;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;
+    --pt-near: #cde2fb;   /* near points lightest on dark */
+    --pt-mid: #5598e7;
+    --pt-far: #256abf;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --accent: #3987e5;
+  --pt-near: #cde2fb;
+  --pt-mid: #5598e7;
+  --pt-far: #256abf;
+}
+
+* { box-sizing: border-box; margin: 0; }
+[hidden] { display: none !important; }
+html, body { background: var(--page); color: var(--ink); }
+body { font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; min-height: 100vh; }
+
+.top {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 16px;
+  max-width: 1400px; margin: 0 auto;
+}
+.top h1 { font-size: 18px; font-weight: 650; }
+.top .host { color: var(--ink-2); font-size: 13px; }
+.top .spacer { flex: 1; }
+
+button, select {
+  font: inherit; color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; min-height: 34px;
+}
+button { cursor: pointer; }
+button:hover { background: var(--grid); }
+button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select { min-width: 0; max-width: 100%; }
+
+.grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  max-width: 1400px; margin: 0 auto; padding: 0 16px 16px;
+}
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; min-width: 0;
+}
+.card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.card-head h2 { font-size: 15px; font-weight: 650; }
+.card-head select { flex: 1 1 220px; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-size: 12px; color: var(--ink-2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px;
+}
+.pill .ico { font-size: 10px; line-height: 1; }
+.pill[data-s="live"] .ico { color: var(--good); }
+.pill[data-s="wait"] .ico { color: var(--warning); }
+.pill[data-s="error"] .ico { color: var(--critical); }
+
+.bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.bar .spacer { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; min-height: 30px; padding: 4px 12px; background: transparent; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.seg button[aria-pressed="true"]:hover { background: var(--accent); }
+.bar-label { color: var(--ink-2); font-size: 12px; }
+
+.stage {
+  position: relative; width: 100%; aspect-ratio: 4 / 3;
+  background: var(--page); border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.stage canvas, .stage img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stage img { object-fit: contain; background: #000; }
+.stage .overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 24px; color: var(--ink-2); pointer-events: none;
+  background: color-mix(in srgb, var(--page) 78%, transparent);
+}
+.stage .overlay[hidden] { display: none; }
+#cam-stage .overlay { background: rgba(0, 0, 0, 0.72); color: #d8d8d0; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 2;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 8px; font-size: 12px; white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+.tip[hidden] { display: none; }
+.tip b { font-weight: 650; }
+.tip span { color: var(--ink-2); }
+
+.values { max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.values[hidden] { display: none; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 5px 10px; text-align: left; border-bottom: 1px solid var(--grid); }
+th { position: sticky; top: 0; background: var(--surface); color: var(--ink-2); font-weight: 600; font-size: 12px; }
+th.num, td.num { text-align: right; }
+td.meter { width: 40%; }
+.meter i { display: block; height: 6px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+@media (max-width: 560px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+.tile { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.tile .k { font-size: 12px; color: var(--ink-2); }
+.tile .v { font-size: 22px; font-weight: 650; line-height: 1.2; }
+.tile .u { font-size: 12px; color: var(--ink-2); font-weight: 400; margin-left: 2px; }
+.tile .s { font-size: 12px; color: var(--ink-2); min-height: 17px; }
+.warn { color: var(--ink); }
+.warn::before { content: "\25B2 "; color: var(--critical); }
+
+.notes { max-width: 1400px; margin: 0 auto; padding: 0 16px 24px; color: var(--ink-2); font-size: 13px; }
+.notes p + p { margin-top: 4px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>Sensor dashboard</h1>
+  <span class="host" id="host"></span>
+  <span class="spacer"></span>
+  <button id="refresh" type="button" title="Re-scan for lidars and cameras (e.g. after plugging one in)">Refresh sources</button>
+</header>
+
+<main class="grid">
+  <section class="card" aria-labelledby="lidar-title">
+    <div class="card-head">
+      <h2 id="lidar-title">Lidar</h2>
+      <label><span class="sr">Lidar source</span><select id="lidar-sel"></select></label>
+      <span class="pill" id="lidar-pill" role="status"><span class="ico"></span><span class="txt"></span></span>
+    </div>
+
+    <div class="bar">
+      <div class="seg" role="group" aria-label="View">
+        <button type="button" data-view="plot" aria-pressed="true">Plot</button>
+        <button type="button" data-view="values" aria-pressed="false">Values</button>
+      </div>
+      <span class="spacer"></span>
+      <span id="range-bar" class="bar" style="margin:0">
+        <span class="bar-label">Range</span>
+        <span class="seg" role="group" aria-label="Plot range">
+          <button type="button" data-range="2" aria-pressed="false">2 m</button>
+          <button type="button" data-range="5" aria-pressed="false">5 m</button>
+          <button type="button" data-range="10" aria-pressed="true">10 m</button>
+          <button type="button" data-range="30" aria-pressed="false">30 m</button>
+        </span>
+      </span>
+    </div>
+
+    <div class="stage" id="lidar-stage">
+      <canvas id="plot" role="img" aria-label="Top-down lidar plot, car at centre facing up"></canvas>
+      <div class="overlay" id="lidar-overlay"></div>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+    <div class="values" id="values" hidden>
+      <table>
+        <thead><tr><th>Bearing</th><th class="num">Nearest (m)</th><th></th></tr></thead>
+        <tbody id="values-body"></tbody>
+      </table>
+    </div>
+
+    <div class="tiles">
+      <div class="tile"><div class="k">Nearest</div><div class="v" id="t-near">&ndash;</div><div class="s" id="t-near-s"></div></div>
+      <div class="tile"><div class="k">Front &plusmn;20&deg;</div><div class="v" id="t-front">&ndash;</div><div class="s"></div></div>
+      <div class="tile"><div class="k">Left 60&ndash;120&deg;</div><div class="v" id="t-left">&ndash;</div><div class="s"></div></div>
+      <div class="tile"><div class="k">Right 60&ndash;120&deg;</div><div class="v" id="t-right">&ndash;</div><div class="s"></div></div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="cam-title">
+    <div class="card-head">
+      <h2 id="cam-title">Camera</h2>
+      <label><span class="sr">Camera source</span><select id="cam-sel"></select></label>
+      <span class="pill" id="cam-pill" role="status"><span class="ico"></span><span class="txt"></span></span>
+    </div>
+    <div class="stage" id="cam-stage">
+      <img id="cam-img" alt="Live camera view" hidden>
+      <div class="overlay" id="cam-overlay"></div>
+    </div>
+    <div class="tiles" style="grid-template-columns: repeat(2, 1fr)">
+      <div class="tile"><div class="k">Resolution</div><div class="v" id="c-res">&ndash;</div></div>
+      <div class="tile"><div class="k">Frame rate</div><div class="v" id="c-fps">&ndash;<span class="u"></span></div></div>
+    </div>
+  </section>
+</main>
+
+<div class="notes" id="notes"></div>
+
+<script>
+(function () {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const RAD = 180 / Math.PI;
+  const CLOSE_M = 0.5;
+
+  const params = new URLSearchParams(location.search);
+  const store = {
+    get(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private window etc. */ } },
+  };
+
+  const S = {
+    lidarId: '', camId: '', es: null,
+    frame: null, frameAt: 0, dirty: false,
+    range: 10, view: 'plot',
+    status: { lidar: {}, camera: {} },
+    pts: null, hover: -1,
+  };
+
+  // ---- theme colours for the canvas (read from CSS so light/dark stay in one place) ----
+  let C = {};
+  function hex(c) { const n = parseInt(c.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+  function readTheme() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    C = { surface: v('--surface'), ink2: v('--ink-2'), muted: v('--muted'), grid: v('--grid'),
+          axis: v('--axis'), accent: v('--accent'), critical: v('--critical'),
+          near: hex(v('--pt-near')), mid: hex(v('--pt-mid')), far: hex(v('--pt-far')) };
+    C.ramp = [];
+    for (let i = 0; i < 6; i++) {
+      const t = i / 5, a = t < 0.5 ? C.near : C.mid, b = t < 0.5 ? C.mid : C.far, u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+      C.ramp.push('rgb(' + a.map((x, k) => Math.round(x + (b[k] - x) * u)).join(',') + ')');
+    }
+    S.dirty = true;
+  }
+  readTheme();
+  if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
+
+  // ---- status pill / overlay helpers ----
+  function setPill(el, kind, text, title) {
+    el.dataset.s = kind;
+    el.querySelector('.ico').textContent = kind === 'live' ? '●' : kind === 'error' ? '▲' : kind === 'wait' ? '◐' : '○';
+    el.querySelector('.txt').textContent = text;
+    el.title = title || '';
+  }
+  function setOverlay(el, text) { el.hidden = !text; el.textContent = text || ''; }
+
+  // ---- source lists ----
+  function fillSelect(sel, items, placeholder, wanted) {
+    sel.textContent = '';
+    const p = document.createElement('option');
+    p.value = ''; p.textContent = placeholder; sel.appendChild(p);
+    items.forEach((it) => {
+      const o = document.createElement('option');
+      o.value = it.id; o.textContent = it.label; sel.appendChild(o);
+    });
+    sel.value = items.some((it) => it.id === wanted) ? wanted : '';
+    return sel.value;
+  }
+
+  async function loadSources(refresh) {
+    let data;
+    try {
+      const r = await fetch('/api/sources' + (refresh ? '?refresh=1' : ''));
+      data = await r.json();
+    } catch (e) {
+      setOverlay($('lidar-overlay'), 'Cannot reach the dashboard server.');
+      return;
+    }
+    const wantL = S.lidarId || params.get('lidar') || store.get('lidar');
+    const wantC = S.camId || params.get('camera') || store.get('camera');
+    const l = fillSelect($('lidar-sel'), data.lidars, data.lidars.length ? 'Select a lidar…' : 'No lidars found', wantL);
+    const c = fillSelect($('cam-sel'), data.cameras, data.cameras.length ? 'Select a camera…' : 'No cameras found', wantC);
+    if (l !== S.lidarId || !S.es) setLidar(l, false);
+    if (c !== S.camId) setCamera(c, false);
+    const n = $('notes'); n.textContent = '';
+    (data.notes || []).forEach((t) => { const p = document.createElement('p'); p.textContent = t; n.appendChild(p); });
+    render();
+  }
+
+  // ---- lidar ----
+  function setLidar(id, persist) {
+    if (S.es) { S.es.close(); S.es = null; }
+    S.lidarId = id; S.frame = null; S.hadFrame = false; S.hover = -1; S.pts = null;
+    if (persist !== false) store.set('lidar', id);
+    if (id) {
+      S.es = new EventSource('/api/lidar/stream?id=' + encodeURIComponent(id));
+      S.es.onmessage = (e) => onScan(JSON.parse(e.data));
+    }
+    updateLidarStatus(); renderTiles(); renderValues(); S.dirty = true;
+  }
+
+  function onScan(f) {
+    S.frame = f; S.frameAt = performance.now(); S.dirty = true;
+    const r = f.r, n = r.length;
+    let near = Infinity, nearI = -1, front = Infinity, left = Infinity, right = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = r[i];
+      if (d <= 0 || d > f.dmax) continue;
+      const deg = (f.a0 + i * f.da) * RAD;
+      if (d < near) { near = d; nearI = i; }
+      const a = Math.abs(deg);
+      if (a <= 20 && d < front) front = d;
+      if (a >= 60 && a <= 120) { if (deg > 0) { if (d < left) left = d; } else if (d < right) right = d; }
+    }
+    f.stats = { near, nearI, front, left, right };
+    renderTiles();
+    if (S.view === 'values') renderValues();
+    if (!S.hadFrame) { S.hadFrame = true; updateLidarStatus(); }
+  }
+
+  const m2 = (mm) => (mm === Infinity ? '–' : (mm / 1000).toFixed(2));
+  function setTile(id, mm) {
+    const el = $(id); el.textContent = m2(mm);
+    if (mm !== Infinity) { const u = document.createElement('span'); u.className = 'u'; u.textContent = 'm'; el.appendChild(u); }
+  }
+  function renderTiles() {
+    const st = S.frame && S.frame.stats;
+    setTile('t-near', st ? st.near : Infinity);
+    setTile('t-front', st ? st.front : Infinity);
+    setTile('t-left', st ? st.left : Infinity);
+    setTile('t-right', st ? st.right : Infinity);
+    const s = $('t-near-s');
+    s.className = 's'; s.textContent = '';
+    if (st && st.nearI >= 0) {
+      const deg = (S.frame.a0 + st.nearI * S.frame.da) * RAD;
+      const side = deg > 1 ? 'left' : deg < -1 ? 'right' : 'ahead';
+      s.textContent = (side === 'ahead' ? 'straight ahead' : Math.abs(deg).toFixed(0) + '° ' + side);
+      if (st.near / 1000 < CLOSE_M) { s.className = 's warn'; s.textContent = 'Close · ' + s.textContent; }
+    }
+  }
+
+  function renderValues() {
+    const f = S.frame, body = $('values-body');
+    body.textContent = '';
+    if (!f) return;
+    const bins = new Map();
+    for (let i = 0; i < f.r.length; i++) {
+      const d = f.r[i];
+      if (d <= 0 || d > f.dmax) continue;
+      const b = Math.floor((f.a0 + i * f.da) * RAD / 10) * 10;   // bin covers [b, b+10) degrees
+      if (!bins.has(b) || d < bins.get(b)) bins.set(b, d);
+    }
+    const first = Math.floor(f.a0 * RAD / 10) * 10, last = Math.floor((f.a0 + (f.r.length - 1) * f.da) * RAD / 10) * 10;
+    for (let b = last; b >= first; b -= 10) {
+      const d = bins.get(b);
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td'), c2 = document.createElement('td'), c3 = document.createElement('td');
+      c1.textContent = b >= 0 ? 'L ' + b + '–' + (b + 10) + '°' : 'R ' + Math.abs(b + 10) + '–' + Math.abs(b) + '°';
+      c2.className = 'num'; c2.textContent = d === undefined ? '–' : (d / 1000).toFixed(2);
+      c3.className = 'meter';
+      if (d !== undefined) { const i = document.createElement('i'); i.style.width = Math.min(100, d / (S.range * 10)) + '%'; c3.appendChild(i); }
+      tr.append(c1, c2, c3); body.appendChild(tr);
+    }
+  }
+
+  // ---- lidar plot ----
+  const plot = $('plot'), ctx = plot.getContext('2d');
+  function draw() {
+    const dpr = window.devicePixelRatio || 1;
+    const W = plot.clientWidth, H = plot.clientHeight;
+    if (!W || !H) return;
+    if (plot.width !== Math.round(W * dpr) || plot.height !== Math.round(H * dpr)) {
+      plot.width = Math.round(W * dpr); plot.height = Math.round(H * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 28, k = R / S.range;   // px per metre
+    const f = S.frame;
+
+    // field-of-view wedge
+    if (f) {
+      const lo = f.a0, hi = f.a0 + (f.r.length - 1) * f.da;
+      ctx.beginPath(); ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, R, -Math.PI / 2 - hi, -Math.PI / 2 - lo);
+      ctx.closePath(); ctx.fillStyle = C.grid; ctx.globalAlpha = 0.35; ctx.fill(); ctx.globalAlpha = 1;
+    }
+    // range rings + labels
+    ctx.lineWidth = 1; ctx.strokeStyle = C.grid; ctx.fillStyle = C.muted;
+    ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    for (let i = 1; i <= 4; i++) {
+      const rr = R * i / 4;
+      ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
+      // labels sit behind the car, in the 90-degree blind cone where a 270-degree lidar has no points
+      const lab = (S.range * i / 4); ctx.fillText((lab % 1 ? lab.toFixed(1) : lab) + ' m', cx + 4, cy + rr - 2);
+    }
+    ctx.strokeStyle = C.axis;
+    ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
+    ctx.fillStyle = C.ink2; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText('FRONT', cx, cy - R - 6);
+
+    // points, bucketed by range so we set fillStyle 6 times, not 1000
+    const pts = [];
+    if (f) {
+      const buckets = C.ramp.map(() => []);
+      for (let i = 0; i < f.r.length; i++) {
+        const d = f.r[i];
+        if (d <= 0 || d > f.dmax) continue;
+        const m = d / 1000; if (m > S.range) continue;
+        const th = f.a0 + i * f.da;
+        const x = cx - m * Math.sin(th) * k, y = cy - m * Math.cos(th) * k;
+        pts.push(x, y, i);
+        buckets[Math.min(5, Math.floor(m / S.range * 6))].push(x, y);
+      }
+      buckets.forEach((b, bi) => {
+        ctx.fillStyle = C.ramp[bi];
+        ctx.beginPath();
+        for (let j = 0; j < b.length; j += 2) ctx.rect(b[j] - 1.25, b[j + 1] - 1.25, 2.5, 2.5);
+        ctx.fill();
+      });
+    }
+    S.pts = pts;
+
+    // car
+    ctx.fillStyle = C.accent; ctx.strokeStyle = C.surface; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy - 9); ctx.lineTo(cx + 6, cy + 7); ctx.lineTo(cx - 6, cy + 7); ctx.closePath();
+    ctx.stroke(); ctx.fill();
+
+    // hovered point: ring only; the value lives in the tooltip + the Values table
+    if (S.hover >= 0 && f) {
+      const x = S.pts[S.hover * 3], y = S.pts[S.hover * 3 + 1];
+      ctx.strokeStyle = C.ink2; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  function render() { S.dirty = false; draw(); }
+  (function loop() { if (S.dirty) render(); requestAnimationFrame(loop); })();
+  new ResizeObserver(() => { S.dirty = true; }).observe(plot);
+
+  // nearest-point hover (a mouse can't hit a 2px dot, so snap to the closest one within 24px)
+  const tip = $('tip');
+  plot.addEventListener('pointermove', (e) => {
+    if (!S.pts || !S.frame || !S.pts.length) return;
+    const b = plot.getBoundingClientRect(), px = e.clientX - b.left, py = e.clientY - b.top;
+    let best = -1, bd = 24 * 24;
+    for (let j = 0, n = S.pts.length / 3; j < n; j++) {
+      const dx = S.pts[j * 3] - px, dy = S.pts[j * 3 + 1] - py, d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = j; }
+    }
+    if (best !== S.hover) { S.hover = best; S.dirty = true; }
+    if (best < 0) { tip.hidden = true; return; }
+    const i = S.pts[best * 3 + 2], deg = (S.frame.a0 + i * S.frame.da) * RAD;
+    tip.textContent = '';
+    const bEl = document.createElement('b'); bEl.textContent = (S.frame.r[i] / 1000).toFixed(3) + ' m';
+    const sp = document.createElement('span');
+    sp.textContent = '  ' + (deg > 0 ? 'L ' : deg < 0 ? 'R ' : '') + Math.abs(deg).toFixed(1) + '°';
+    tip.append(bEl, sp); tip.hidden = false;
+    tip.style.left = Math.min(px + 12, b.width - tip.offsetWidth - 4) + 'px';
+    tip.style.top = Math.max(py - 30, 4) + 'px';
+  });
+  plot.addEventListener('pointerleave', () => { S.hover = -1; tip.hidden = true; S.dirty = true; });
+
+  // ---- camera ----
+  const img = $('cam-img');
+  // Frames arrive as base64 JPEGs over server-sent events (the same transport as the lidar), so this
+  // works in any browser - no reliance on <img> multipart/MJPEG support.
+  function setCamera(id, persist) {
+    if (S.camEs) { S.camEs.close(); S.camEs = null; }
+    S.camId = id;
+    if (persist !== false) store.set('camera', id);
+    img.hidden = true; img.removeAttribute('src');
+    if (id) {
+      S.camEs = new EventSource('/api/camera/stream?id=' + encodeURIComponent(id));
+      S.camEs.onmessage = (e) => { img.src = 'data:image/jpeg;base64,' + e.data; };
+    }
+    updateCameraStatus();
+  }
+  img.addEventListener('load', () => {
+    if (img.naturalWidth) $('c-res').textContent = img.naturalWidth + '×' + img.naturalHeight;
+  });
+
+  // ---- status polling ----
+  function updateLidarStatus() {
+    const pill = $('lidar-pill'), ov = $('lidar-overlay');
+    if (!S.lidarId) { setPill(pill, 'off', 'Off'); setOverlay(ov, 'Choose a lidar from the dropdown to start.'); return; }
+    const st = S.status.lidar[S.lidarId];
+    const stale = S.frame && performance.now() - S.frameAt > 3000;
+    if (st && st.state === 'streaming' && S.frame && !stale) {
+      setPill(pill, 'live', 'Live · ' + st.fps.toFixed(1) + ' Hz'); setOverlay(ov, '');
+    } else if (st && st.state === 'error') {
+      setPill(pill, 'error', 'Error', st.msg); setOverlay(ov, st.msg + '\n(retrying every 2 s)');
+    } else if (stale) {
+      setPill(pill, 'wait', 'No data'); setOverlay(ov, 'No scans received for 3 s.');
+    } else {
+      setPill(pill, 'wait', 'Connecting…'); setOverlay(ov, (st && st.msg) || 'Connecting…');
+    }
+    ov.style.whiteSpace = 'pre-line';
+  }
+  function updateCameraStatus() {
+    const pill = $('cam-pill'), ov = $('cam-overlay');
+    const fpsEl = $('c-fps'), resEl = $('c-res');
+    if (!S.camId) {
+      setPill(pill, 'off', 'Off'); setOverlay(ov, 'Choose a camera from the dropdown to start.');
+      img.hidden = true; resEl.textContent = '–'; fpsEl.textContent = '–'; return;
+    }
+    const st = S.status.camera[S.camId];
+    if (st && st.state === 'streaming') {
+      setPill(pill, 'live', 'Live · ' + st.fps.toFixed(1) + ' fps'); setOverlay(ov, ''); img.hidden = false;
+      resEl.textContent = img.naturalWidth ? img.naturalWidth + '×' + img.naturalHeight : '–';
+      fpsEl.textContent = st.fps.toFixed(1);
+      const u = document.createElement('span'); u.className = 'u'; u.textContent = 'fps'; fpsEl.appendChild(u);
+    } else if (st && st.state === 'error') {
+      setPill(pill, 'error', 'Error', st.msg); setOverlay(ov, st.msg + '\n(retrying every 2 s)'); img.hidden = true;
+    } else {
+      setPill(pill, 'wait', 'Connecting…'); setOverlay(ov, (st && st.msg) || 'Connecting…'); img.hidden = true;
+    }
+    ov.style.whiteSpace = 'pre-line';
+  }
+  async function pollStatus() {
+    try {
+      S.status = await (await fetch('/api/status', { cache: 'no-store' })).json();
+    } catch (e) { S.status = { lidar: {}, camera: {} }; }
+    updateLidarStatus(); updateCameraStatus();
+  }
+  setInterval(pollStatus, 1000);
+
+  // ---- controls ----
+  $('lidar-sel').addEventListener('change', (e) => setLidar(e.target.value));
+  $('cam-sel').addEventListener('change', (e) => setCamera(e.target.value));
+  $('refresh').addEventListener('click', async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Scanning…';
+    await loadSources(true);
+    e.target.disabled = false; e.target.textContent = 'Refresh sources';
+  });
+  document.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
+    S.range = +b.dataset.range;
+    document.querySelectorAll('[data-range]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    S.dirty = true; if (S.view === 'values') renderValues();
+  }));
+  document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
+    S.view = b.dataset.view;
+    document.querySelectorAll('[data-view]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    const plotView = S.view === 'plot';
+    $('lidar-stage').hidden = !plotView; $('values').hidden = plotView; $('range-bar').hidden = !plotView;
+    if (plotView) S.dirty = true; else renderValues();
+  }));
+
+  $('host').textContent = location.host;
+  loadSources(false).then(pollStatus);
+})();
+</script>
+</body>
+</html>

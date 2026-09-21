@@ -63,6 +63,75 @@ Use these to sanity-check the VESC/servo wiring and calibration
 (`speed_to_erpm_gain`, `steering_angle_to_servo_gain`, etc. in
 `f1tenth_stack/config/vesc.yaml`) before trusting the full autonomy stack.
 
+## Sensor dashboard (lidar + camera viewer, runs on the Raspberry Pi)
+
+```bash
+python3 ~/scripts/real/sensor_dashboard/sensor_dashboard.py
+# then open  http://<pi-ip>:8090  from any browser on the network
+```
+
+A standalone page with a **lidar dropdown** and a **camera dropdown**. Pick a
+sensor and its display fills in live: a top-down lidar plot (with nearest /
+front / left / right distances, hover for exact range + bearing, and a Values
+tab with a per-10° table) and the camera picture. No ROS required — pure
+Python 3.7+ stdlib. Optional extras unlock more dropdown entries:
+
+```bash
+sudo apt install python3-opencv   # USB / V4L2 cameras
+sudo apt install python3-serial   # every USB / serial lidar
+```
+
+What shows up in the dropdowns (press **Refresh sources** after plugging
+something in):
+
+| Dropdown | Entry | Notes |
+|---|---|---|
+| Lidar | Whatever you name with `--lidar TYPE:ADDRESS` | See "Supported lidars" below. With no `--lidar`, a Hokuyo at `192.168.0.10:10940` (as in `autonomy.launch.py`) is listed. |
+| Lidar | Every USB serial port found | One entry per lidar type that could be on it (a CP210x adapter offers RPLIDAR + LD06, a Hokuyo USB id offers Hokuyo). **Nothing is written to a port until you pick one of its entries.** |
+| Lidar | ROS 2 topic `/scan` | Only listed if `rclpy` imports (source ROS first). Works for any lidar with a ROS driver, and while another program (e.g. `urg_node2`) already holds the lidar. |
+| Camera | USB webcams | Via OpenCV, MJPG 640×480 @ 15 fps (`--cam-width/--cam-height/--cam-fps/--cam-quality`). |
+| Camera | Pi CSI camera | Via `rpicam-vid` / `libcamera-vid` (preinstalled on Raspberry Pi OS). |
+| both | Demo | Simulated lidar / test-pattern camera, to check the page with no hardware (`--no-demo` hides them). |
+
+### Supported lidars
+
+| `--lidar` type | Lidars | Address |
+|---|---|---|
+| `hokuyo` | URG / UST / UTM (SCIP 2.0), e.g. UST-10LX | `192.168.0.10[:10940]` or `/dev/ttyACM1` |
+| `rplidar` | Slamtec RPLIDAR A1 / A2 / A3 / S1 (baud is auto-probed) | `/dev/ttyUSB0` (or `host:port`, e.g. an S2E) |
+| `ld06` | LDROBOT LD06 / LD19 / LD14 (`ld19`, `ld14` also accepted) | `/dev/ttyUSB0` |
+| `sick` | SICK TiM / LMS over Ethernet (CoLa-A) | `192.168.0.1[:2111]` |
+| *(ROS entry)* | anything else with a ROS driver, e.g. YDLIDAR | — |
+
+```bash
+python3 sensor_dashboard.py --lidar rplidar:/dev/ttyUSB0 --lidar sick:192.168.0.1
+python3 sensor_dashboard.py --lidar ld06:/dev/ttyUSB0,baud=230400
+```
+
+Mounting fix-ups apply to every lidar: `--lidar-yaw 90` rotates the plot, and
+`--lidar-mirror` flips left/right if a lidar spins the opposite way to what's
+assumed. Rotating lidars (RPLIDAR, LD06) are assumed to spin clockwise with
+0° at their front marking; if the plot is mirrored or turned, use those two flags.
+To add another lidar, copy `LdRobotLidar` (streaming) or `SickLidar` (poll and
+reply) in [lidar_drivers.py](sensor_dashboard/lidar_drivers.py) and register it
+in `DRIVERS`.
+
+**Only the Hokuyo/RPLIDAR/LD06/SICK byte formats are tested, and only against
+simulated devices** written from the vendors' protocol documents — none of it
+has run on a real lidar yet. If a lidar shows nothing, the error appears in the
+lidar panel (wrong port / baud / model is called out).
+
+Notes:
+- If a serial port belongs to something else (say a motor-controller MCU), keep
+  it out of the list with `--serial-exclude /dev/ttyACM0`.
+- A sensor is only opened while a browser is watching it, and is shared between
+  browsers. Close the tab (or pick the blank entry) and it's released; if the
+  script turned the lidar's laser on it turns it back off.
+- The page has no login, so anyone on the network can watch the camera. Use
+  `--host 127.0.0.1` to keep it local.
+- On a Pi 3, drop `--cam-fps` / `--cam-width` first if the CPU gets warm; the
+  lidar side is cheap.
+
 ## Known gotchas
 
 - **`/dev/ttyACM0` permissions**: every launch path here `chmod`s it, but if
