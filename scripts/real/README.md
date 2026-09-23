@@ -121,6 +121,30 @@ simulated devices** written from the vendors' protocol documents — none of it
 has run on a real lidar yet. If a lidar shows nothing, the error appears in the
 lidar panel (wrong port / baud / model is called out).
 
+**Controls above the lidar plot**
+- **See from … to … [unit]**: type the closest and farthest distance to show, in
+  m / cm / mm / ft / in — it's converted to metres (shown next to the boxes).
+  Anything outside is hidden from the plot, the readings and the Values table.
+  The farthest number is also the plot's radius. Saved per browser.
+- **Refresh (Hz)**: scans per second sent to the dashboard (0.5–50), applied
+  live to the running lidar for every open page. The lidar itself may spin
+  slower than this (an RPLIDAR A1 does roughly 5–10 revolutions/s, an LD06 10);
+  the green pill shows the rate you actually get.
+- **Close objects:** a dotted circle marks the lidar's own blind zone (an
+  RPLIDAR A1/A2 can't measure closer than ~0.15 m and reports nothing there —
+  that's the sensor, not the software). Outside it, a dropped "no return" no
+  longer erases a real reading and a nearer reading isn't overwritten by the
+  background behind it, so close and thin objects stay put instead of blinking.
+
+**Nothing shows / it keeps retrying?**
+- The terminal prints a timestamped line for every open, failure (with the reason)
+  and stream start. Add `--debug` to also see the raw bytes, per-second packet
+  counts and (RPLIDAR/Hokuyo) each command and reply.
+- `python lidar_probe.py COM3` (or `/dev/ttyUSB0`) listens on the port at every
+  common baud rate, tries the RPLIDAR health request, and prints which lidar it is
+  and the exact `--lidar ...` command to use. Stop the dashboard first — only one
+  program can hold a serial port. Run it with no argument to list the ports.
+
 Notes:
 - If a serial port belongs to something else (say a motor-controller MCU), keep
   it out of the list with `--serial-exclude /dev/ttyACM0`.

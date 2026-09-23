@@ -111,6 +111,17 @@ select { min-width: 0; max-width: 100%; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
 .seg button[aria-pressed="true"]:hover { background: var(--accent); }
 .bar-label { color: var(--ink-2); font-size: 12px; }
+input[type="number"] {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 8px; min-height: 34px; width: 5.5em; font-variant-numeric: tabular-nums;
+}
+input[type="number"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[aria-invalid="true"] { border-color: var(--critical); }
+.conv { color: var(--ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.conv.bad { color: var(--ink); }
+.conv.bad::before { content: "\25B2 "; color: var(--critical); }
+.caption { color: var(--ink-2); font-size: 12px; margin-top: 8px; min-height: 17px; }
 
 .stage {
   position: relative; width: 100%; aspect-ratio: 4 / 3;
@@ -182,15 +193,26 @@ td.meter { width: 40%; }
         <button type="button" data-view="values" aria-pressed="false">Values</button>
       </div>
       <span class="spacer"></span>
-      <span id="range-bar" class="bar" style="margin:0">
-        <span class="bar-label">Range</span>
-        <span class="seg" role="group" aria-label="Plot range">
-          <button type="button" data-range="2" aria-pressed="false">2 m</button>
-          <button type="button" data-range="5" aria-pressed="false">5 m</button>
-          <button type="button" data-range="10" aria-pressed="true">10 m</button>
-          <button type="button" data-range="30" aria-pressed="false">30 m</button>
-        </span>
+      <span class="bar" style="margin:0" title="Refresh rate: how many scans per second the dashboard shows. The lidar itself may spin slower than this; the green pill shows the rate you actually get.">
+        <label class="bar-label" for="hz-val">Refresh</label>
+        <input id="hz-val" type="number" inputmode="decimal" min="0.5" max="50" step="any" value="10">
+        <span class="bar-label">Hz</span>
       </span>
+    </div>
+
+    <div class="bar" title="Anything closer than the first number, or farther than the second, is hidden from the plot and the readings. Type it in any unit - it is converted to metres.">
+      <span class="bar-label">See from</span>
+      <input id="min-val" type="number" inputmode="decimal" min="0" step="any" value="0" aria-label="Closest distance to show">
+      <span class="bar-label">to</span>
+      <input id="max-val" type="number" inputmode="decimal" min="0" step="any" value="10" aria-label="Farthest distance to show">
+      <select id="unit-sel" aria-label="Unit for the distances you type">
+        <option value="1">m</option>
+        <option value="0.01">cm</option>
+        <option value="0.001">mm</option>
+        <option value="0.3048">ft</option>
+        <option value="0.0254">in</option>
+      </select>
+      <span class="conv" id="dist-conv" role="status"></span>
     </div>
 
     <div class="stage" id="lidar-stage">
@@ -198,6 +220,7 @@ td.meter { width: 40%; }
       <div class="overlay" id="lidar-overlay"></div>
       <div class="tip" id="tip" hidden></div>
     </div>
+    <p class="caption" id="plot-note"></p>
     <div class="values" id="values" hidden>
       <table>
         <thead><tr><th>Bearing</th><th class="num">Nearest (m)</th><th></th></tr></thead>
@@ -248,7 +271,7 @@ td.meter { width: 40%; }
   const S = {
     lidarId: '', camId: '', es: null,
     frame: null, frameAt: 0, dirty: false,
-    range: 10, view: 'plot',
+    min: 0, range: 10, view: 'plot',   // distance window in metres: show only min..range
     status: { lidar: {}, camera: {} },
     pts: null, hover: -1,
   };
@@ -311,6 +334,7 @@ td.meter { width: 40%; }
     if (c !== S.camId) setCamera(c, false);
     const n = $('notes'); n.textContent = '';
     (data.notes || []).forEach((t) => { const p = document.createElement('p'); p.textContent = t; n.appendChild(p); });
+    syncHz(data.lidar_hz, data.hz_min, data.hz_max);
     render();
   }
 
@@ -326,13 +350,18 @@ td.meter { width: 40%; }
     updateLidarStatus(); renderTiles(); renderValues(); S.dirty = true;
   }
 
-  function onScan(f) {
-    S.frame = f; S.frameAt = performance.now(); S.dirty = true;
+  // A reading counts if the lidar reported one (>0, within its own limit) and it lies inside the
+  // distance window the user typed in.
+  function inWindow(d, f) {
+    return d > 0 && d <= f.dmax && d >= S.min * 1000 && d <= S.range * 1000;
+  }
+
+  function computeStats(f) {
     const r = f.r, n = r.length;
     let near = Infinity, nearI = -1, front = Infinity, left = Infinity, right = Infinity;
     for (let i = 0; i < n; i++) {
       const d = r[i];
-      if (d <= 0 || d > f.dmax) continue;
+      if (!inWindow(d, f)) continue;
       const deg = (f.a0 + i * f.da) * RAD;
       if (d < near) { near = d; nearI = i; }
       const a = Math.abs(deg);
@@ -340,8 +369,14 @@ td.meter { width: 40%; }
       if (a >= 60 && a <= 120) { if (deg > 0) { if (d < left) left = d; } else if (d < right) right = d; }
     }
     f.stats = { near, nearI, front, left, right };
+  }
+
+  function onScan(f) {
+    S.frame = f; S.frameAt = performance.now(); S.dirty = true;
+    computeStats(f);
     renderTiles();
     if (S.view === 'values') renderValues();
+    updatePlotNote();
     if (!S.hadFrame) { S.hadFrame = true; updateLidarStatus(); }
   }
 
@@ -373,7 +408,7 @@ td.meter { width: 40%; }
     const bins = new Map();
     for (let i = 0; i < f.r.length; i++) {
       const d = f.r[i];
-      if (d <= 0 || d > f.dmax) continue;
+      if (!inWindow(d, f)) continue;
       const b = Math.floor((f.a0 + i * f.da) * RAD / 10) * 10;   // bin covers [b, b+10) degrees
       if (!bins.has(b) || d < bins.get(b)) bins.set(b, d);
     }
@@ -418,8 +453,19 @@ td.meter { width: 40%; }
       const rr = R * i / 4;
       ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.stroke();
       // labels sit behind the car, in the 90-degree blind cone where a 270-degree lidar has no points
-      const lab = (S.range * i / 4); ctx.fillText((lab % 1 ? lab.toFixed(1) : lab) + ' m', cx + 4, cy + rr - 2);
+      ctx.fillText(+(S.range * i / 4).toFixed(2) + ' m', cx + 4, cy + rr - 2);
     }
+
+    // zones with no readings: the lidar's own blind zone, and anything the user chose to hide
+    const zone = (metres, fill, alpha, dash) => {
+      const rr = metres * k;
+      if (rr < 2) return;
+      ctx.beginPath(); ctx.arc(cx, cy, Math.min(rr, R), 0, Math.PI * 2);
+      ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.setLineDash(dash); ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+    };
+    if (f && f.dmin) zone(f.dmin / 1000, C.axis, 0.5, [2, 3]);   // can't measure here
+    if (S.min > 0) zone(S.min, C.grid, 0.7, [6, 4]);               // hidden by the "See from" setting
     ctx.strokeStyle = C.axis;
     ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
     ctx.fillStyle = C.ink2; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
@@ -431,8 +477,8 @@ td.meter { width: 40%; }
       const buckets = C.ramp.map(() => []);
       for (let i = 0; i < f.r.length; i++) {
         const d = f.r[i];
-        if (d <= 0 || d > f.dmax) continue;
-        const m = d / 1000; if (m > S.range) continue;
+        if (!inWindow(d, f)) continue;
+        const m = d / 1000;
         const th = f.a0 + i * f.da;
         const x = cx - m * Math.sin(th) * k, y = cy - m * Math.cos(th) * k;
         pts.push(x, y, i);
@@ -545,6 +591,7 @@ td.meter { width: 40%; }
     try {
       S.status = await (await fetch('/api/status', { cache: 'no-store' })).json();
     } catch (e) { S.status = { lidar: {}, camera: {} }; }
+    syncHz(S.status.lidar_hz);
     updateLidarStatus(); updateCameraStatus();
   }
   setInterval(pollStatus, 1000);
@@ -557,18 +604,71 @@ td.meter { width: 40%; }
     await loadSources(true);
     e.target.disabled = false; e.target.textContent = 'Refresh sources';
   });
-  document.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
-    S.range = +b.dataset.range;
-    document.querySelectorAll('[data-range]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-    S.dirty = true; if (S.view === 'values') renderValues();
-  }));
   document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
     S.view = b.dataset.view;
     document.querySelectorAll('[data-view]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
     const plotView = S.view === 'plot';
-    $('lidar-stage').hidden = !plotView; $('values').hidden = plotView; $('range-bar').hidden = !plotView;
+    $('lidar-stage').hidden = !plotView; $('values').hidden = plotView; $('plot-note').hidden = !plotView;
     if (plotView) S.dirty = true; else renderValues();
   }));
+
+  // ---- distance window: "See from [min] to [max] [unit]" - typed, converted to metres ----
+  const MAX_M = 100;
+  const fmtM = (m) => String(+m.toFixed(3));
+  function readDistance(save) {
+    const unit = +$('unit-sel').value;
+    const lo = parseFloat($('min-val').value), hi = parseFloat($('max-val').value);
+    const loOk = Number.isFinite(lo) && lo >= 0, hiOk = Number.isFinite(hi) && hi > 0;
+    const loM = lo * unit, hiM = hi * unit;
+    let msg = '';
+    if (!loOk) msg = 'The closest distance must be 0 or more.';
+    else if (!hiOk) msg = 'The farthest distance must be more than 0.';
+    else if (hiM <= loM) msg = 'The farthest distance must be larger than the closest.';
+    else if (hiM > MAX_M) msg = 'The farthest distance is limited to ' + MAX_M + ' m.';
+    const crossed = loOk && hiOk && hiM <= loM;
+    $('min-val').setAttribute('aria-invalid', String(!loOk || crossed));
+    $('max-val').setAttribute('aria-invalid', String(!hiOk || crossed || (hiOk && hiM > MAX_M)));
+    const conv = $('dist-conv');
+    if (msg) { conv.className = 'conv bad'; conv.textContent = msg + ' Keeping the last valid range.'; return; }
+    S.min = loM; S.range = hiM;
+    conv.className = 'conv'; conv.textContent = '= ' + fmtM(loM) + ' to ' + fmtM(hiM) + ' m';
+    if (save) store.set('dist', JSON.stringify({ min: $('min-val').value, max: $('max-val').value, unit: $('unit-sel').value }));
+    if (S.frame) { computeStats(S.frame); renderTiles(); }
+    if (S.view === 'values') renderValues();
+    updatePlotNote(); S.dirty = true;
+  }
+  function updatePlotNote() {
+    const f = S.frame, parts = [];
+    if (f && f.dmin) parts.push('Dotted circle: this lidar cannot measure closer than ' + fmtM(f.dmin / 1000) + ' m.');
+    if (S.min > 0) parts.push('Dashed circle: anything closer than ' + fmtM(S.min) + ' m is hidden.');
+    $('plot-note').textContent = parts.join(' ');
+  }
+  ['min-val', 'max-val'].forEach((id) => $(id).addEventListener('input', () => readDistance(true)));
+  $('unit-sel').addEventListener('change', () => readDistance(true));
+  try {
+    const d = JSON.parse(store.get('dist') || 'null');
+    if (d && d.min !== undefined) { $('min-val').value = d.min; $('max-val').value = d.max; $('unit-sel').value = d.unit; }
+    if (!$('unit-sel').value) $('unit-sel').value = '1';
+  } catch (e) { /* keep defaults */ }
+  readDistance(false);
+
+  // ---- refresh rate (Hz): applies to the lidar on the server, for every open page ----
+  const hzEl = $('hz-val');
+  async function sendHz() {
+    const v = parseFloat(hzEl.value);
+    if (!Number.isFinite(v) || v <= 0) { hzEl.setAttribute('aria-invalid', 'true'); return; }
+    hzEl.removeAttribute('aria-invalid');
+    try {
+      const j = await (await fetch('/api/lidar/rate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hz: v }) })).json();
+      if (j.lidar_hz !== undefined) hzEl.value = j.lidar_hz;   // shows the value actually applied (it is clamped)
+    } catch (e) { hzEl.setAttribute('aria-invalid', 'true'); }
+  }
+  hzEl.addEventListener('change', sendHz);
+  function syncHz(v, lo, hi) {
+    if (lo !== undefined) { hzEl.min = lo; hzEl.max = hi; }
+    if (v !== undefined && document.activeElement !== hzEl) hzEl.value = v;   // don't fight the user's typing
+  }
 
   $('host').textContent = location.host;
   loadSources(false).then(pollStatus);

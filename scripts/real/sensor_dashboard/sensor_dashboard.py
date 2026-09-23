@@ -63,10 +63,16 @@ except ImportError:
     cv2 = None
     np = None
 
-from lidar_drivers import build_lidars, shutdown_ros
+from lidar_drivers import build_lidars, set_debug, shutdown_ros
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 HTML_PATH = os.path.join(HERE, 'sensor_dashboard.html')
+
+
+def log(msg):
+    """Timestamped line in the terminal: what each sensor is doing (opening, streaming, failed, closed)."""
+    t = time.time()
+    print('[%s.%03d] %s' % (time.strftime('%H:%M:%S', time.localtime(t)), int(t * 1000) % 1000, msg), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +119,7 @@ class Feed:
             if not self.subs and self.stop is not None:
                 self.stop.set()
                 self.state, self.msg, self.fps = 'idle', '', 0.0
+                log(f'{self.source.id}: last viewer left, closing')
 
     def shutdown(self):
         with self.lock:
@@ -130,6 +137,7 @@ class Feed:
         self.stop = stop
         self.state, self.msg, self.fps = 'connecting', '', 0.0
         self._n, self._t0 = 0, time.time()
+        log(f'{self.source.id}: opening ({self.source.label})')
         self.thread = threading.Thread(target=self._run, args=(stop,), daemon=True)
         self.thread.start()
 
@@ -148,6 +156,7 @@ class Feed:
                 if stop.is_set():
                     break
                 self.state, self.msg, self.fps = 'error', f'{type(e).__name__}: {e}', 0.0
+                log(f'{self.source.id}: FAILED - {self.msg} - retrying in 2 s')
             stop.wait(2.0)
 
     def _publish(self, item, stop):
@@ -162,6 +171,7 @@ class Feed:
             self._n, self._t0 = 0, now
         if self.state != 'streaming':
             self.state, self.msg = 'streaming', ''
+            log(f'{self.source.id}: streaming')
         for q in list(self.subs):
             try:
                 q.put_nowait(item)
@@ -409,11 +419,31 @@ def build_cameras(args):
 
 LIDARS = None
 CAMERAS = None
+ARGS = None   # the parsed options; ARGS.lidar_hz is read live by the lidar drivers
+
+MIN_HZ, MAX_HZ = 0.5, 50.0
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
+
+    def do_POST(self):
+        url = urlparse(self.path)
+        if url.path != '/api/lidar/rate':
+            self._json(404, {'error': 'not found'})
+            return
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+            hz = float(json.loads(self.rfile.read(length) or b'{}')['hz'])
+            if not math.isfinite(hz):
+                raise ValueError
+        except (ValueError, KeyError, TypeError):
+            self._json(400, {'error': 'send JSON like {"hz": 10}'})
+            return
+        ARGS.lidar_hz = min(MAX_HZ, max(MIN_HZ, hz))
+        log(f'lidar refresh rate set to {ARGS.lidar_hz:g} Hz')
+        self._json(200, {'lidar_hz': ARGS.lidar_hz, 'min': MIN_HZ, 'max': MAX_HZ})
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -426,9 +456,10 @@ class Handler(BaseHTTPRequestHandler):
                 LIDARS.refresh()
                 CAMERAS.refresh()
             self._json(200, {'lidars': LIDARS.listing(), 'cameras': CAMERAS.listing(),
-                             'notes': LIDARS.notes + CAMERAS.notes})
+                             'notes': LIDARS.notes + CAMERAS.notes,
+                             'lidar_hz': ARGS.lidar_hz, 'hz_min': MIN_HZ, 'hz_max': MAX_HZ})
         elif url.path == '/api/status':
-            self._json(200, {'lidar': LIDARS.status(), 'camera': CAMERAS.status()})
+            self._json(200, {'lidar': LIDARS.status(), 'camera': CAMERAS.status(), 'lidar_hz': ARGS.lidar_hz})
         elif url.path == '/api/lidar/stream':
             self._stream(LIDARS, sid, lambda item: item)
         elif url.path == '/api/camera/stream':
@@ -505,7 +536,8 @@ def parse_args(argv=None):
                    help='a lidar to list; repeatable. TYPE: hokuyo | rplidar | ld06 | sick. ADDRESS: serial '
                         'port or host[:port]. E.g. rplidar:/dev/ttyUSB0  sick:192.168.0.1  '
                         'hokuyo:192.168.0.10:10940. Default: hokuyo:192.168.0.10:10940')
-    p.add_argument('--lidar-hz', type=float, default=10.0, help='max lidar frames/sec sent to the browser')
+    p.add_argument('--lidar-hz', type=float, default=10.0,
+                   help='lidar frames/sec sent to the browser (starting value; change it live in the dashboard)')
     p.add_argument('--lidar-yaw', type=float, default=0.0, metavar='DEG',
                    help='rotate every lidar plot by this many degrees counter-clockwise (mounting offset)')
     p.add_argument('--lidar-mirror', action='store_true',
@@ -518,12 +550,16 @@ def parse_args(argv=None):
     p.add_argument('--cam-fps', type=int, default=15)
     p.add_argument('--cam-quality', type=int, default=70, help='JPEG quality 1-100')
     p.add_argument('--no-demo', action='store_true', help='hide the simulated lidar/camera')
+    p.add_argument('--debug', action='store_true',
+                   help='trace what the lidar drivers send/receive (bytes, packet counts) in the terminal')
     return p.parse_args(argv)
 
 
 def main(argv=None):
-    global LIDARS, CAMERAS
-    args = parse_args(argv)
+    global LIDARS, CAMERAS, ARGS
+    args = ARGS = parse_args(argv)
+    args.lidar_hz = min(MAX_HZ, max(MIN_HZ, args.lidar_hz))
+    set_debug(args.debug)
     LIDARS = Registry(lambda: build_lidars(args))
     CAMERAS = Registry(lambda: build_cameras(args))
 

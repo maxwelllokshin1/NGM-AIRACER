@@ -49,6 +49,26 @@ try:
 except ImportError:
     rclpy = None
 
+DEBUG = False
+
+
+def set_debug(on):
+    global DEBUG
+    DEBUG = on
+
+
+def dlog(msg):
+    """Driver trace, printed only with --debug."""
+    if DEBUG:
+        t = time.time()
+        print('[%s.%03d] [lidar] %s' % (time.strftime('%H:%M:%S', time.localtime(t)), int(t * 1000) % 1000, msg),
+              flush=True)
+
+
+def hexdump(data, n=24):
+    data = bytes(data[:n])
+    return data.hex(' ') if data else '(nothing)'
+
 
 # ---------------------------------------------------------------------------
 # Transports: a serial port or a TCP socket, same interface
@@ -98,10 +118,13 @@ class TcpTransport:
 class SerialTransport:
     def __init__(self, path, baud):
         if serial is None:
-            raise RuntimeError('pyserial is not installed (sudo apt install python3-serial)')
+            raise RuntimeError('pyserial is not installed (Windows/Mac: pip install pyserial, '
+                               'Raspberry Pi: sudo apt install python3-serial)')
         self.ser = serial.Serial(path, baud, timeout=1.0)
+        dlog(f'opened {path} at {baud} baud (DTR={self.ser.dtr}, RTS={self.ser.rts})')
 
     def write(self, data):
+        dlog(f'-> {hexdump(data)}')
         self.ser.write(data)
 
     def read(self):
@@ -145,9 +168,15 @@ class LidarSource:
     label = ''
 
     def __init__(self, args):
-        self.hz = args.lidar_hz
+        self._args = args
         self.yaw = math.radians(args.lidar_yaw)
         self.mirror = args.lidar_mirror
+
+    @property
+    def hz(self):
+        """Frames per second to send. Read live (the dashboard can change it while running), so
+        drivers must use self.hz each scan instead of caching it."""
+        return self._args.lidar_hz
 
     def frame(self, a0, da, ranges, dmin, dmax):
         """Apply --lidar-mirror / --lidar-yaw so every driver gets the same mounting fix-ups."""
@@ -161,21 +190,36 @@ class LidarSource:
 
 
 class ScanAssembler:
-    """For lidars that stream individual (angle, distance) points: keep the newest reading per
-    angular bin and hand out a uniform 360-degree frame on request. Bins not refreshed within
-    max_age seconds (an object moved, the lidar lost a return) read as 'no return'."""
+    """For lidars that stream individual (angle, distance) points: keep one reading per angular
+    bin and hand out a uniform 360-degree frame on request.
 
-    def __init__(self, bins, clockwise, max_age=0.5):
+    Two rules keep close objects from vanishing:
+      * a 'no return' (0) never erases a real reading - a lidar reports 0 intermittently for very
+        close or shiny surfaces, which would make the object blink. Readings just expire instead:
+        a bin not refreshed within max_age seconds reads as 'no return'.
+      * a nearer reading is not overwritten by a farther one arriving within `hold` seconds - the
+        background sample that lands in the same bin as a thin or edge-of-object point would
+        otherwise wipe it out on every revolution.
+    hold is longer than one revolution of the slowest common lidar (~5 Hz), so the near reading
+    survives until it has been refreshed or the object has really moved away."""
+
+    def __init__(self, bins, clockwise, max_age=0.5, hold=0.3):
         self.n = bins
         self.step = 360.0 / bins
         self.cw = clockwise
         self.max_age = max_age
+        self.hold = hold
         self.r = [0] * bins
         self.t = [0.0] * bins
 
     def add(self, angle_deg, dist_mm, now):
+        if dist_mm <= 0:
+            return
         theta = -angle_deg if self.cw else angle_deg          # everything downstream is counter-clockwise
         i = int(((theta + 180.0) % 360.0) / self.step) % self.n
+        old = self.r[i]
+        if old > 0 and dist_mm > old and now - self.t[i] < self.hold:
+            return
         self.r[i] = dist_mm
         self.t[i] = now
 
@@ -217,13 +261,18 @@ class ScipLink:
 
     def command(self, cmd, timeout=2.0):
         """Send a command; return (status_code, remaining_reply_lines)."""
+        chatty = not cmd.startswith('GD')   # skip the per-scan poll, it would print 10x a second
+        if chatty:
+            dlog(f'SCIP -> {cmd}')
         self.t.write(cmd.encode() + b'\n')
         deadline = time.time() + timeout
         self.buf = b''
         while not self.buf.endswith(b'\n\n'):   # every SCIP reply ends with a blank line
             if time.time() > deadline:
-                raise TimeoutError(f'no reply to {cmd[:2]}')
+                raise TimeoutError(f'no reply to {cmd[:2]} (got {hexdump(self.buf, 32)})')
             self.buf += self.t.read().replace(b'\r', b'')
+        if chatty:
+            dlog(f'SCIP <- {self.buf[:60]!r}')
         lines = self.buf.rstrip(b'\n').split(b'\n')
         if len(lines) < 2 or lines[0][:2] != cmd[:2].encode():
             raise ScipError(f'unexpected reply to {cmd[:2]}: {lines[:2]!r}')
@@ -287,7 +336,6 @@ class HokuyoLidar(LidarSource):
 
             step = 2 * math.pi / p['ARES']
             a0 = (p['AMIN'] - p['AFRT']) * step
-            interval = 1.0 / self.hz
             bad = 0
             while not stop.is_set():
                 t0 = time.time()
@@ -302,7 +350,7 @@ class HokuyoLidar(LidarSource):
                 dmin = p['DMIN']
                 ranges = [d if d >= dmin else 0 for d in ranges]   # below DMIN are error codes, not distances
                 publish(self.frame(a0, step, ranges, dmin, p['DMAX']))
-                stop.wait(max(0.0, interval - (time.time() - t0)))
+                stop.wait(max(0.0, 1.0 / self.hz - (time.time() - t0)))
         finally:
             if laser_on_by_us:   # only switch it off if we're the one who switched it on
                 try:
@@ -356,6 +404,7 @@ class RplidarLidar(LidarSource):
         self.address, self.baud = address, baud
         self.id = f'rplidar:{address}'
         self.label = f'RPLIDAR - {address}'
+        self._motor_dtr = None   # DTR level that spins an A1's motor; adapters differ, so it's discovered
 
     def run(self, publish, stop, note):
         if is_serial_address(self.address):
@@ -383,7 +432,9 @@ class RplidarLidar(LidarSource):
             d = rp_descriptor(buf)
             if d:
                 end, length, dtype = d
+                dlog(f'RPLIDAR descriptor: length={length} type=0x{dtype:02x}')
                 return buf[end:], length, dtype
+        dlog(f'no RPLIDAR descriptor within {seconds}s; received {len(buf)} bytes: {hexdump(buf, 32)}')
         return None
 
     def _healthy(self, t):
@@ -400,22 +451,46 @@ class RplidarLidar(LidarSource):
             rest += t.read()
         if len(rest) < 3:
             return False
+        dlog('RPLIDAR health: %s' % {0: 'good', 1: 'warning', 2: 'error'}.get(rest[0], rest[0]))
         if rest[0] == 2:
             raise RuntimeError('RPLIDAR reports a hardware error (code 0x%04x)' % (rest[1] | rest[2] << 8))
         return True
 
-    def _scan(self, t, publish, stop, note):
-        note('starting motor')
-        t.set_dtr(False)                                    # A1: adapter DTR low = motor on
+    def _start_scan(self, t, dtr, stop):
+        """Motor on (A1: adapter DTR line; A2/A3: PWM command), request a scan, and wait for the first
+        nodes - the motor needs a moment to spin up before the lidar has anything to send.
+        Returns the bytes received so far, or None if no scan data showed up."""
+        t.set_dtr(dtr)
         t.write(rp_cmd(0xF0, struct.pack('<H', 660)))       # A2/A3: motor PWM (ignored by the others)
+        time.sleep(0.05)
         t.reset_input()
         t.write(rp_cmd(0x20))                               # SCAN
-        got = self._wait_descriptor(t, 5.0)                 # motor spin-up can take a couple of seconds
+        got = self._wait_descriptor(t, 3.0)
         if not got or got[2] != 0x81 or got[1] != 5:
             raise RuntimeError('RPLIDAR did not start a standard scan (unsupported model or mode)')
         buf = bytearray(got[0])
+        deadline = time.time() + 3.5
+        while len(buf) < 100 and time.time() < deadline and not stop.is_set():
+            buf += t.read()
+        dlog(f'DTR={dtr}: {len(buf)} bytes of scan data after start')
+        return buf if len(buf) >= 100 else None
+
+    def _scan(self, t, publish, stop, note):
+        levels = [self._motor_dtr] if self._motor_dtr is not None else [True, False]
+        for dtr in levels:
+            note(f'starting motor (DTR {"high" if dtr else "low"})')
+            buf = self._start_scan(t, dtr, stop)
+            if buf is not None:
+                self._motor_dtr = dtr
+                break
+            t.write(rp_cmd(0x25))                           # STOP, then try the other polarity
+            time.sleep(0.05)
+        else:
+            raise RuntimeError('the RPLIDAR accepted the scan command but sent no scan data with the motor '
+                               'line either way (DTR high or low) - is the motor actually spinning? '
+                               'Check the lidar\'s power (motors often need more than a weak USB port gives)')
         asm = ScanAssembler(720, clockwise=True)
-        last_emit, interval = 0.0, 1.0 / self.hz
+        last_emit = 0.0
         while not stop.is_set():
             data = t.read()
             if not data:
@@ -431,16 +506,17 @@ class RplidarLidar(LidarSource):
                 asm.add(node[0], node[1], now)
                 n += 5
             del buf[:n]
-            if now - last_emit >= interval:
+            if now - last_emit >= 1.0 / self.hz:
                 last_emit = now
                 a0, da, r = asm.snapshot(now)
-                publish(self.frame(a0, da, r, 100, 40000))
+                publish(self.frame(a0, da, r, 150, 40000))   # A1/A2 can't measure closer than ~0.15 m
 
     def _quiesce(self, t):
         try:
             t.write(rp_cmd(0x25))                           # STOP
             t.write(rp_cmd(0xF0, struct.pack('<H', 0)))     # motor PWM 0
-            t.set_dtr(True)                                 # A1 motor off
+            if self._motor_dtr is not None:
+                t.set_dtr(not self._motor_dtr)              # A1 motor off
         except Exception:
             pass
 
@@ -489,18 +565,32 @@ class LdRobotLidar(LidarSource):
         self.label = f'LDROBOT LD06/LD19 - {address}'
 
     def run(self, publish, stop, note):
-        note(f'listening on {self.address}')
-        t = open_transport(self.address, self.baud or 230400, default_port=None)
+        baud = self.baud or 230400
+        note(f'listening on {self.address} at {baud} baud')
+        t = open_transport(self.address, baud, default_port=None)
         try:
             asm = ScanAssembler(360, clockwise=True)
             buf = bytearray()
-            last_ok, last_emit, interval = time.time(), 0.0, 1.0 / self.hz
+            last_ok, last_emit = time.time(), 0.0
+            total = {'bytes': 0, 'headers': 0, 'bad_crc': 0, 'good': 0}
+            window = dict(total)
+            first, window_start = None, time.time()
             while not stop.is_set():
-                buf += t.read()
+                data = t.read()
+                if data:
+                    if first is None:
+                        first = bytes(data[:24])
+                        dlog(f'{self.address}: first bytes received: {hexdump(first)}')
+                    total['bytes'] += len(data)
+                    window['bytes'] += len(data)
+                    buf += data
                 now = time.time()
+                if DEBUG and now - window_start >= 1.0:
+                    dlog(f'{self.address}: last {now - window_start:.1f}s: {window["bytes"]} bytes, '
+                         f'{window["headers"]} headers, {window["good"]} good packets, {window["bad_crc"]} bad CRC')
+                    window, window_start = dict.fromkeys(window, 0), now
                 if now - last_ok > 3.0:
-                    raise RuntimeError('no valid LD06/LD19 packets for 3 s '
-                                       '(wrong port or baud, or not an LDROBOT lidar)')
+                    raise RuntimeError('no valid LD06/LD19 packets for 3 s - ' + self._why(total, baud, first))
                 while True:
                     i = buf.find(b'\x54\x2c')                 # header + "12 points per packet"
                     if i < 0:
@@ -509,19 +599,34 @@ class LdRobotLidar(LidarSource):
                     del buf[:i]
                     if len(buf) < 47:
                         break
+                    total['headers'] += 1
+                    window['headers'] += 1
                     if ld_crc8(buf[:46]) != buf[46]:
+                        total['bad_crc'] += 1
+                        window['bad_crc'] += 1
                         del buf[:1]
                         continue
+                    total['good'] += 1
+                    window['good'] += 1
                     for angle, dist in ld_parse_packet(buf[:47]):
                         asm.add(angle, dist, now)
                     del buf[:47]
                     last_ok = now
-                if now - last_emit >= interval and now - last_ok < 1.0:
+                if now - last_emit >= 1.0 / self.hz and now - last_ok < 1.0:
                     last_emit = now
                     a0, da, r = asm.snapshot(now)
                     publish(self.frame(a0, da, r, 20, 12000))
         finally:
             t.close()
+
+    @staticmethod
+    def _why(total, baud, first):
+        if total['bytes'] == 0:
+            return ('nothing at all arrived on the port (is the lidar powered and spinning? '
+                    'wrong port? run lidar_probe.py to check other baud rates)')
+        return (f'{total["bytes"]} bytes arrived but none formed an LD06/LD19 packet '
+                f'({total["headers"]} header hits, {total["bad_crc"]} bad CRC; first bytes: {hexdump(first)}). '
+                f'Wrong baud (using {baud}) or a different lidar, e.g. RPLIDAR - run lidar_probe.py')
 
 
 # ---------------------------------------------------------------------------
@@ -557,7 +662,7 @@ class SickLidar(LidarSource):
     def run(self, publish, stop, note):
         note(f'connecting to {self.address}')
         t = open_transport(self.address, 0, default_port=2111)
-        buf, interval = b'', 1.0 / self.hz
+        buf = b''
         try:
             while not stop.is_set():
                 t0 = time.time()
@@ -569,8 +674,8 @@ class SickLidar(LidarSource):
                     buf += t.read()
                 telegram, _, buf = buf.partition(b'\x03')
                 a0, da, ranges = sick_parse_telegram(telegram.decode('ascii', 'replace'))
-                publish(self.frame(a0, da, ranges, 20, 30000))
-                stop.wait(max(0.0, interval - (time.time() - t0)))
+                publish(self.frame(a0, da, ranges, 50, 30000))
+                stop.wait(max(0.0, 1.0 / self.hz - (time.time() - t0)))
         finally:
             t.close()
 
@@ -592,11 +697,10 @@ class RosScanLidar(LidarSource):
             rclpy.init()
         node = rclpy.create_node(f'sensor_dashboard_{os.getpid()}')
         last = [0.0]
-        interval = 1.0 / self.hz
 
         def on_scan(msg):
             now = time.time()
-            if now - last[0] < interval:
+            if now - last[0] < 1.0 / self.hz:
                 return
             last[0] = now
             ranges = [int(x * 1000) if math.isfinite(x) and x >= msg.range_min else 0
